@@ -1,0 +1,16 @@
+[{
+    "name":"johnathan",
+    "age":25,
+    "city":"Hawkins",
+    "amount":1500
+},{
+    "name":"will",
+    "age":23,
+    "city":"Hawkins",
+    "amount":2000
+},{
+    "name":"Nancy",
+    "age":22,
+    "city":"Hawkins",
+    "amount":2500
+}]
