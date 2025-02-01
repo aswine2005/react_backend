@@ -468,9 +468,28 @@ app.get("/api/books/:bookId/feedback", async (req, res) => {
 app.post("/api/payments/create", auth, async (req, res) => {
   try {
     const { items, totalAmount } = req.body;
-    
+
     if (!items || !items.length) {
       return res.status(400).json({ message: "No items provided" });
+    }
+
+    // Validate all books exist and are available
+    const bookValidations = await Promise.all(
+      items.map(async (item) => {
+        const book = await Book.findOne({ id: item.bookId });
+        if (!book) {
+          return { valid: false, message: `Book ${item.bookId} not found` };
+        }
+        if (!book.available || book.quantity <= 0) {
+          return { valid: false, message: `Book ${item.bookId} is not available` };
+        }
+        return { valid: true, book };
+      })
+    );
+
+    const invalidBook = bookValidations.find(validation => !validation.valid);
+    if (invalidBook) {
+      return res.status(400).json({ message: invalidBook.message });
     }
 
     // Create payment record
@@ -481,14 +500,24 @@ app.post("/api/payments/create", auth, async (req, res) => {
         rentalDuration: item.rentalDuration
       })),
       totalAmount,
-      status: 'pending'
+      status: 'pending',
+      createdAt: new Date()
     });
 
     await payment.save();
-    res.status(201).json({ paymentId: payment._id });
+
+    // Return the payment ID
+    res.status(201).json({ 
+      message: "Payment created successfully",
+      paymentId: payment._id 
+    });
+
   } catch (error) {
     console.error("Error creating payment:", error);
-    res.status(500).json({ message: "Error creating payment" });
+    res.status(500).json({ 
+      message: "Error creating payment",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
