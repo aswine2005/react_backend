@@ -140,7 +140,17 @@ app.get("/api/auth/profile", auth, async (req, res) => {
   }
 });
 
-// Book APIs
+// Books Routes
+app.get("/api/books", async (req, res) => {
+  try {
+    const books = await Book.find({});
+    res.json(books);
+  } catch (error) {
+    console.error("Error fetching books:", error);
+    res.status(500).json({ message: "Error fetching books" });
+  }
+});
+
 app.post("/api/books", auth, async (req, res) => {
   const { title, author, description, quantity, rentPrice } = req.body;
   try {
@@ -159,16 +169,6 @@ app.post("/api/books", auth, async (req, res) => {
   } catch (err) {
     console.error("Error adding book:", err);
     res.status(500).json({ message: "Error adding book" });
-  }
-});
-
-app.get("/api/books", async (req, res) => {
-  try {
-    const books = await Book.find();
-    res.status(200).json(books);
-  } catch (err) {
-    console.error("Error fetching books:", err);
-    res.status(500).json({ message: "Error fetching books" });
   }
 });
 
