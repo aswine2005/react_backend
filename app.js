@@ -12,56 +12,34 @@ require("dotenv").config();
 
 const app = express();
 
+// CORS Configuration
+const corsOptions = {
+  origin: [
+    'http://localhost:5176',  // Vite development server
+    'http://localhost:3000',  // React development server
+    'https://react-backend-gc4j.onrender.com',  // Replace with your frontend deployment URL
+    'https://online-book-rental-store-react.vercel.app'  // Another potential frontend URL
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'Access-Control-Allow-Methods', 
+    'Access-Control-Allow-Origin', 
+    'Access-Control-Allow-Headers'
+  ],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
+
+// Preflight request handler
+app.options('*', cors(corsOptions));
+
 // Middleware
 app.use(express.json());
-
-// CORS middleware
-app.use((req, res, next) => {
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:5176',
-    'https://react-backend-gc4j.onrender.com'
-  ];
-  const origin = req.headers.origin;
-  
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Credentials', true);
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-    return;
-  }
-  next();
-});
-
-// Use cors middleware with proper configuration
-app.use(cors({
-  origin: function(origin, callback) {
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:5176',
-      'https://react-backend-gc4j.onrender.com'
-    ];
-    
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
-}));
 
 // MongoDB Atlas Connection
 const connectDB = async () => {
@@ -774,6 +752,26 @@ app.post("/api/payments/:paymentId/process", auth, async (req, res) => {
     console.error("Error processing payment:", error);
     res.status(500).json({ message: "Error processing payment" });
   }
+});
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error('Global Error Handler:', {
+    message: err.message,
+    stack: err.stack,
+    method: req.method,
+    path: req.path,
+    origin: req.headers.origin,
+    headers: req.headers
+  });
+
+  res.status(500).json({
+    message: 'Internal Server Error',
+    error: process.env.NODE_ENV === 'development' ? {
+      message: err.message,
+      stack: err.stack
+    } : undefined
+  });
 });
 
 // Start the Server
