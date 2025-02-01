@@ -6,6 +6,7 @@ const auth = require("./middlewares/auth");
 const User = require("./models/user");
 const Book = require("./models/book");
 const Payment = require("./models/payment");
+const Cart = require("./models/cart");
 const cors = require("cors");
 require("dotenv").config();
 
@@ -185,29 +186,26 @@ app.get("/api/books/:id", async (req, res) => {
   }
 });
 
-// Cart Operations
+// Cart Routes
 app.get("/api/cart", auth, async (req, res) => {
   try {
-    const user = await User.findOne({ id: req.user.id });
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+    let cart = await Cart.findOne({ userId: req.user.id });
+    if (!cart) {
+      cart = { items: [] };
     }
 
-    // Get full book details for each book in cart
-    const cartItems = await Promise.all(
-      user.cart.map(async (bookId) => {
-        const book = await Book.findOne({ id: bookId });
-        return book;
+    // Fetch book details for each cart item
+    const cartItemsWithDetails = await Promise.all(
+      cart.items.map(async (item) => {
+        const book = await Book.findOne({ id: item.bookId });
+        return {
+          ...item.toObject(),
+          book
+        };
       })
     );
 
-    // Filter out any null values (in case a book was deleted)
-    const validCartItems = cartItems.filter(item => item !== null);
-
-    res.json({
-      message: "Cart retrieved successfully",
-      cart: validCartItems
-    });
+    res.json({ items: cartItemsWithDetails });
   } catch (error) {
     console.error("Error fetching cart:", error);
     res.status(500).json({ message: "Error fetching cart" });
@@ -216,70 +214,118 @@ app.get("/api/cart", auth, async (req, res) => {
 
 app.post("/api/cart/add", auth, async (req, res) => {
   try {
-    const { bookId } = req.body;
-    const book = await Book.findOne({ id: bookId });
+    const { bookId, rentalDuration = 1 } = req.body;
     
+    // Validate book exists
+    const book = await Book.findOne({ id: bookId });
     if (!book) {
       return res.status(404).json({ message: "Book not found" });
     }
-    
-    if (!book.available) {
-      return res.status(400).json({ message: "Book not available" });
+
+    // Find or create cart
+    let cart = await Cart.findOne({ userId: req.user.id });
+    if (!cart) {
+      cart = new Cart({ userId: req.user.id, items: [] });
     }
 
-    const user = await User.findOne({ id: req.user.id });
-    if (user.cart.includes(bookId)) {
+    // Check if book already in cart
+    const existingItem = cart.items.find(item => item.bookId === bookId);
+    if (existingItem) {
       return res.status(400).json({ message: "Book already in cart" });
     }
 
-    user.cart.push(bookId);
-    await user.save();
+    // Add book to cart
+    cart.items.push({ bookId, rentalDuration });
+    cart.updatedAt = new Date();
+    await cart.save();
 
-    // After adding to cart, return the updated cart with book details
-    const cartItems = await Promise.all(
-      user.cart.map(async (bookId) => {
-        const book = await Book.findOne({ id: bookId });
-        return book;
-      })
-    );
-
-    const validCartItems = cartItems.filter(item => item !== null);
-
-    res.json({ 
-      message: "Book added to cart", 
-      cart: validCartItems 
-    });
+    res.status(201).json({ message: "Book added to cart", cart });
   } catch (error) {
     console.error("Error adding to cart:", error);
-    res.status(500).json({ message: "Error adding book to cart" });
+    res.status(500).json({ message: "Error adding to cart" });
   }
 });
 
 app.delete("/api/cart/remove/:bookId", auth, async (req, res) => {
   try {
     const { bookId } = req.params;
-    const user = await User.findOne({ id: req.user.id });
+    const cart = await Cart.findOne({ userId: req.user.id });
     
-    user.cart = user.cart.filter(id => id !== bookId);
-    await user.save();
+    if (!cart) {
+      return res.status(404).json({ message: "Cart not found" });
+    }
 
-    // After removing from cart, return the updated cart with book details
-    const cartItems = await Promise.all(
-      user.cart.map(async (bookId) => {
-        const book = await Book.findOne({ id: bookId });
-        return book;
-      })
-    );
+    cart.items = cart.items.filter(item => item.bookId !== bookId);
+    cart.updatedAt = new Date();
+    await cart.save();
 
-    const validCartItems = cartItems.filter(item => item !== null);
-
-    res.json({ 
-      message: "Book removed from cart", 
-      cart: validCartItems 
-    });
+    res.json({ message: "Item removed from cart", cart });
   } catch (error) {
     console.error("Error removing from cart:", error);
-    res.status(500).json({ message: "Error removing book from cart" });
+    res.status(500).json({ message: "Error removing from cart" });
+  }
+});
+
+app.put("/api/cart/update/:bookId", auth, async (req, res) => {
+  try {
+    const { bookId } = req.params;
+    const { rentalDuration } = req.body;
+    
+    const cart = await Cart.findOne({ userId: req.user.id });
+    if (!cart) {
+      return res.status(404).json({ message: "Cart not found" });
+    }
+
+    const item = cart.items.find(item => item.bookId === bookId);
+    if (!item) {
+      return res.status(404).json({ message: "Item not found in cart" });
+    }
+
+    item.rentalDuration = rentalDuration;
+    cart.updatedAt = new Date();
+    await cart.save();
+
+    res.json({ message: "Cart updated", cart });
+  } catch (error) {
+    console.error("Error updating cart:", error);
+    res.status(500).json({ message: "Error updating cart" });
+  }
+});
+
+// Profile Update Route
+app.put("/api/users/profile/update", auth, async (req, res) => {
+  try {
+    const { rentedBooks } = req.body;
+    
+    const user = await User.findOne({ id: req.user.id });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Add new rentals to user's rented books
+    user.rentedBooks = [
+      ...user.rentedBooks,
+      ...rentedBooks
+    ];
+
+    await user.save();
+
+    // Clear user's cart after successful rental
+    await Cart.findOneAndDelete({ userId: req.user.id });
+
+    res.json({ 
+      message: "Profile updated successfully",
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phoneNo: user.phoneNo,
+        rentedBooks: user.rentedBooks
+      }
+    });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    res.status(500).json({ message: "Error updating profile" });
   }
 });
 
