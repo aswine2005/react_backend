@@ -504,6 +504,9 @@ app.get("/api/books/:bookId/feedback", async (req, res) => {
 
 // Payment Routes
 app.post("/api/payments/create", auth, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { items, totalAmount } = req.body;
     console.log('Payment creation request:', {
@@ -513,49 +516,28 @@ app.post("/api/payments/create", auth, async (req, res) => {
     });
 
     // Input validation
-    if (!items || !Array.isArray(items)) {
-      console.log('Invalid items format:', items);
-      return res.status(400).json({ message: "Invalid items format" });
-    }
-
-    if (items.length === 0) {
-      console.log('No items provided');
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: "No items provided" });
     }
 
     if (typeof totalAmount !== 'number' || totalAmount <= 0) {
-      console.log('Invalid total amount:', totalAmount);
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: "Invalid total amount" });
     }
-
-    // Log each item for debugging
-    items.forEach((item, index) => {
-      console.log(`Item ${index}:`, {
-        bookId: item.bookId,
-        rentalDuration: item.rentalDuration,
-        rentPrice: item.rentPrice
-      });
-    });
 
     // Calculate expected total
     const calculatedTotal = items.reduce((total, item) => {
       const itemTotal = item.rentPrice * item.rentalDuration;
-      console.log(`Item total for ${item.bookId}:`, {
-        rentPrice: item.rentPrice,
-        duration: item.rentalDuration,
-        itemTotal
-      });
       return total + itemTotal;
     }, 0);
 
-    console.log('Total amount comparison:', {
-      calculated: calculatedTotal,
-      received: totalAmount,
-      difference: Math.abs(calculatedTotal - totalAmount)
-    });
-
     // Verify total amount matches
     if (Math.abs(calculatedTotal - totalAmount) > 0.01) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ 
         message: "Total amount mismatch",
         expected: calculatedTotal,
@@ -566,39 +548,37 @@ app.post("/api/payments/create", auth, async (req, res) => {
     // Validate all books exist and are available
     const bookValidationResults = await Promise.all(
       items.map(async (item) => {
-        try {
-          const book = await Book.findOne({ id: item.bookId });
-          console.log(`Book validation for ${item.bookId}:`, {
-            found: !!book,
-            available: book?.available,
-            quantity: book?.quantity,
-            rentPrice: book?.rentPrice,
-            itemRentPrice: item.rentPrice
-          });
-
-          if (!book) {
-            return { valid: false, message: `Book ${item.bookId} not found` };
-          }
-          if (!book.available || book.quantity <= 0) {
-            return { valid: false, message: `Book ${item.bookId} is not available` };
-          }
-          if (Math.abs(book.rentPrice - item.rentPrice) > 0.01) {
-            return { 
-              valid: false, 
-              message: `Price mismatch for book ${item.bookId}. Expected: ${book.rentPrice}, Got: ${item.rentPrice}` 
-            };
-          }
-          return { valid: true, book };
-        } catch (error) {
-          console.error(`Error validating book ${item.bookId}:`, error);
-          return { valid: false, message: `Error validating book ${item.bookId}: ${error.message}` };
+        const book = await Book.findOne({ id: item.bookId });
+        
+        if (!book) {
+          return { 
+            valid: false, 
+            message: `Book ${item.bookId} not found` 
+          };
         }
+        
+        if (!book.available || book.quantity <= 0) {
+          return { 
+            valid: false, 
+            message: `Book ${item.bookId} is not available` 
+          };
+        }
+        
+        if (Math.abs(book.rentPrice - item.rentPrice) > 0.01) {
+          return { 
+            valid: false, 
+            message: `Price mismatch for book ${item.bookId}. Expected: ${book.rentPrice}, Got: ${item.rentPrice}` 
+          };
+        }
+        
+        return { valid: true, book };
       })
     );
 
     const invalidBook = bookValidationResults.find(result => !result.valid);
     if (invalidBook) {
-      console.log('Invalid book found:', invalidBook);
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: invalidBook.message });
     }
 
@@ -615,35 +595,21 @@ app.post("/api/payments/create", auth, async (req, res) => {
       createdAt: new Date()
     });
 
-    console.log('Creating payment:', {
-      userId: payment.userId,
-      itemCount: payment.items.length,
-      totalAmount: payment.totalAmount
-    });
-
-    await payment.save();
-    console.log('Payment saved successfully:', payment._id);
+    await payment.save({ session });
 
     // Update book quantities
-    try {
-      await Promise.all(
-        items.map(async (item) => {
-          const book = await Book.findOne({ id: item.bookId });
-          book.quantity -= 1;
-          book.available = book.quantity > 0;
-          await book.save();
-          console.log(`Updated quantity for book ${item.bookId}:`, {
-            newQuantity: book.quantity,
-            available: book.available
-          });
-        })
-      );
-    } catch (error) {
-      console.error('Error updating book quantities:', error);
-      // Rollback payment creation
-      await Payment.deleteOne({ _id: payment._id });
-      throw new Error('Failed to update book quantities');
-    }
+    await Promise.all(
+      items.map(async (item) => {
+        const book = await Book.findOne({ id: item.bookId });
+        book.quantity -= 1;
+        book.available = book.quantity > 0;
+        await book.save({ session });
+      })
+    );
+
+    // Commit transaction
+    await session.commitTransaction();
+    session.endSession();
 
     // Return success response
     res.status(201).json({ 
@@ -653,10 +619,14 @@ app.post("/api/payments/create", auth, async (req, res) => {
     });
 
   } catch (error) {
+    // Rollback transaction in case of error
+    await session.abortTransaction();
+    session.endSession();
+
     console.error("Error creating payment:", {
       name: error.name,
       message: error.message,
-      stack: error.stack,
+      stack: error.stack
     });
 
     // Check for specific error types
