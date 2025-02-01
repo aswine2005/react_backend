@@ -250,11 +250,11 @@ app.get("/api/cart", auth, async (req, res) => {
           return null;
         }
         return {
-          bookId: book.id,
+          bookId: item.bookId,
           title: book.title,
           author: book.author,
           imageUrl: book.imageUrl,
-          rentPrice: book.rentPrice,
+          rentPrice: book.rentPrice || 0,
           rentalDuration: item.rentalDuration || 1,
           available: book.available && book.quantity > 0
         };
@@ -297,7 +297,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
       return res.status(400).json({ message: "Book already in cart" });
     }
 
-    // Add book to cart
+    // Add book to cart with validated rental duration
     cart.items.push({ 
       bookId, 
       rentalDuration: Math.max(1, Math.min(30, rentalDuration)) // Limit duration between 1 and 30 days
@@ -315,7 +315,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
           title: bookDetails.title,
           author: bookDetails.author,
           imageUrl: bookDetails.imageUrl,
-          rentPrice: bookDetails.rentPrice,
+          rentPrice: bookDetails.rentPrice || 0,
           rentalDuration: item.rentalDuration,
           available: bookDetails.available && bookDetails.quantity > 0
         };
