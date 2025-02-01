@@ -14,6 +14,22 @@ const app = express();
 
 // Middleware
 app.use(express.json());
+
+// CORS middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', true);
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+});
+
 app.use(cors());
 
 // MongoDB Atlas Connection
@@ -199,7 +215,8 @@ app.get("/api/cart", auth, async (req, res) => {
       cart.items.map(async (item) => {
         const book = await Book.findOne({ id: item.bookId });
         return {
-          ...item.toObject(),
+          bookId: item.bookId,
+          rentalDuration: item.rentalDuration,
           book
         };
       })
@@ -246,42 +263,30 @@ app.post("/api/cart/add", auth, async (req, res) => {
   }
 });
 
-app.delete("/api/cart/remove/:bookId", auth, async (req, res) => {
-  try {
-    const { bookId } = req.params;
-    const cart = await Cart.findOne({ userId: req.user.id });
-    
-    if (!cart) {
-      return res.status(404).json({ message: "Cart not found" });
-    }
-
-    cart.items = cart.items.filter(item => item.bookId !== bookId);
-    cart.updatedAt = new Date();
-    await cart.save();
-
-    res.json({ message: "Item removed from cart", cart });
-  } catch (error) {
-    console.error("Error removing from cart:", error);
-    res.status(500).json({ message: "Error removing from cart" });
-  }
-});
-
 app.put("/api/cart/update/:bookId", auth, async (req, res) => {
   try {
     const { bookId } = req.params;
     const { rentalDuration } = req.body;
-    
+
+    // Validate rental duration
+    if (!rentalDuration || rentalDuration < 1) {
+      return res.status(400).json({ message: "Invalid rental duration" });
+    }
+
+    // Find cart
     const cart = await Cart.findOne({ userId: req.user.id });
     if (!cart) {
       return res.status(404).json({ message: "Cart not found" });
     }
 
-    const item = cart.items.find(item => item.bookId === bookId);
-    if (!item) {
-      return res.status(404).json({ message: "Item not found in cart" });
+    // Find item in cart
+    const cartItem = cart.items.find(item => item.bookId === bookId);
+    if (!cartItem) {
+      return res.status(404).json({ message: "Book not found in cart" });
     }
 
-    item.rentalDuration = rentalDuration;
+    // Update rental duration
+    cartItem.rentalDuration = rentalDuration;
     cart.updatedAt = new Date();
     await cart.save();
 
@@ -289,6 +294,28 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
   } catch (error) {
     console.error("Error updating cart:", error);
     res.status(500).json({ message: "Error updating cart" });
+  }
+});
+
+app.delete("/api/cart/remove/:bookId", auth, async (req, res) => {
+  try {
+    const { bookId } = req.params;
+
+    // Find cart
+    const cart = await Cart.findOne({ userId: req.user.id });
+    if (!cart) {
+      return res.status(404).json({ message: "Cart not found" });
+    }
+
+    // Remove item from cart
+    cart.items = cart.items.filter(item => item.bookId !== bookId);
+    cart.updatedAt = new Date();
+    await cart.save();
+
+    res.json({ message: "Book removed from cart", cart });
+  } catch (error) {
+    console.error("Error removing from cart:", error);
+    res.status(500).json({ message: "Error removing from cart" });
   }
 });
 
@@ -407,216 +434,95 @@ app.get("/api/books/:bookId/feedback", async (req, res) => {
 });
 
 // Payment Routes
-app.post("/api/payments/initiate", auth, async (req, res) => {
+app.post("/api/payments/create", auth, async (req, res) => {
   try {
-    const { bookId, paymentMethod, rentDuration } = req.body;
-
-    // Validate required fields
-    if (!bookId || !paymentMethod || !rentDuration) {
-      return res.status(400).json({ 
-        message: "Missing required fields. Please provide bookId, paymentMethod, and rentDuration" 
-      });
-    }
-
-    // Validate payment method
-    const validPaymentMethods = ['credit_card', 'debit_card', 'upi', 'net_banking'];
-    if (!validPaymentMethods.includes(paymentMethod)) {
-      return res.status(400).json({ 
-        message: "Invalid payment method. Use: credit_card, debit_card, upi, or net_banking" 
-      });
-    }
-
-    const book = await Book.findOne({ id: bookId });
-    if (!book) {
-      return res.status(404).json({ message: "Book not found" });
-    }
-
-    if (!book.available || book.quantity <= 0) {
-      return res.status(400).json({ message: "Book not available" });
-    }
-
-    // Calculate rent dates
-    const rentStartDate = new Date();
-    const rentEndDate = new Date(rentStartDate);
-    rentEndDate.setDate(rentEndDate.getDate() + rentDuration);
-
-    // Calculate total amount
-    const amount = book.rentPrice * rentDuration;
-
-    const payment = new Payment({
-      id: uuidv4(),
-      userId: req.user.id,
-      bookId: book.id,
-      amount,
-      paymentMethod,
-      status: 'pending',
-      rentDuration,
-      rentStartDate,
-      rentEndDate
-    });
-
-    await payment.save();
-
-    res.status(201).json({
-      message: "Payment initiated successfully",
-      payment: {
-        id: payment.id,
-        amount,
-        paymentMethod,
-        status: payment.status,
-        rentStartDate,
-        rentEndDate,
-        book: {
-          id: book.id,
-          title: book.title,
-          author: book.author,
-          rentPrice: book.rentPrice
-        }
-      }
-    });
-  } catch (error) {
-    console.error("Error initiating payment:", error);
-    res.status(500).json({ message: "Error initiating payment", error: error.message });
-  }
-});
-
-app.post("/api/payments/:paymentId/process", auth, async (req, res) => {
-  try {
-    const { paymentId } = req.params;
-    // Auto-generate a transaction ID
-    const transactionId = 'TXN_' + uuidv4();
-
-    const payment = await Payment.findOne({ id: paymentId });
-    if (!payment) {
-      return res.status(404).json({ message: "Payment not found" });
-    }
-
-    if (payment.userId !== req.user.id) {
-      return res.status(403).json({ message: "Not authorized to process this payment" });
-    }
-
-    if (payment.status === 'completed') {
-      return res.status(400).json({ message: "Payment already completed" });
-    }
-
-    // Get book and verify availability again
-    const book = await Book.findOne({ id: payment.bookId });
-    if (!book || !book.available || book.quantity <= 0) {
-      payment.status = 'failed';
-      await payment.save();
-      return res.status(400).json({ message: "Book no longer available" });
-    }
-
-    // Update payment
-    payment.status = 'completed';
-    payment.transactionId = transactionId;
-    await payment.save();
-
-    // Update book quantity
-    book.quantity -= 1;
-    book.available = book.quantity > 0;
-    await book.save();
-
-    // Update user's rented books
-    const user = await User.findOne({ id: req.user.id });
-    user.rentedBooks.push(payment.bookId);
-    // Remove book from cart if it's there
-    user.cart = user.cart.filter(id => id !== payment.bookId);
-    await user.save();
-
-    res.json({
-      message: "Payment processed successfully",
-      payment: {
-        id: payment.id,
-        amount: payment.amount,
-        status: payment.status,
-        transactionId,
-        rentStartDate: payment.rentStartDate,
-        rentEndDate: payment.rentEndDate,
-        book: {
-          id: book.id,
-          title: book.title,
-          author: book.author
-        }
-      }
-    });
-  } catch (error) {
-    console.error("Error processing payment:", error);
-    res.status(500).json({ message: "Error processing payment", error: error.message });
-  }
-});
-
-app.get("/api/payments", auth, async (req, res) => {
-  try {
-    const payments = await Payment.find({ userId: req.user.id });
+    const { items, totalAmount } = req.body;
     
-    // Get book details for each payment
-    const paymentDetails = await Promise.all(
-      payments.map(async (payment) => {
-        const book = await Book.findOne({ id: payment.bookId });
-        return {
-          id: payment.id,
-          amount: payment.amount,
-          status: payment.status,
-          paymentMethod: payment.paymentMethod,
-          rentStartDate: payment.rentStartDate,
-          rentEndDate: payment.rentEndDate,
-          transactionId: payment.transactionId,
-          book: book ? {
-            id: book.id,
-            title: book.title,
-            author: book.author
-          } : null
-        };
-      })
-    );
+    if (!items || !items.length) {
+      return res.status(400).json({ message: "No items provided" });
+    }
 
-    res.json({
-      message: "Payments retrieved successfully",
-      payments: paymentDetails
+    // Create payment record
+    const payment = new Payment({
+      userId: req.user.id,
+      items: items.map(item => ({
+        bookId: item.bookId,
+        rentalDuration: item.rentalDuration
+      })),
+      totalAmount,
+      status: 'pending'
     });
+
+    await payment.save();
+    res.status(201).json({ paymentId: payment._id });
   } catch (error) {
-    console.error("Error fetching payments:", error);
-    res.status(500).json({ message: "Error fetching payments", error: error.message });
+    console.error("Error creating payment:", error);
+    res.status(500).json({ message: "Error creating payment" });
   }
 });
 
 app.get("/api/payments/:paymentId", auth, async (req, res) => {
   try {
     const { paymentId } = req.params;
-    const payment = await Payment.findOne({ id: paymentId });
-
+    const payment = await Payment.findOne({ _id: paymentId, userId: req.user.id });
+    
     if (!payment) {
       return res.status(404).json({ message: "Payment not found" });
     }
 
-    if (payment.userId !== req.user.id) {
-      return res.status(403).json({ message: "Not authorized to view this payment" });
-    }
-
-    // Get book details
-    const book = await Book.findOne({ id: payment.bookId });
-
-    res.json({
-      message: "Payment retrieved successfully",
-      payment: {
-        id: payment.id,
-        amount: payment.amount,
-        status: payment.status,
-        paymentMethod: payment.paymentMethod,
-        rentStartDate: payment.rentStartDate,
-        rentEndDate: payment.rentEndDate,
-        transactionId: payment.transactionId,
-        book: book ? {
-          id: book.id,
-          title: book.title,
-          author: book.author
-        } : null
-      }
-    });
+    res.json(payment);
   } catch (error) {
     console.error("Error fetching payment:", error);
-    res.status(500).json({ message: "Error fetching payment", error: error.message });
+    res.status(500).json({ message: "Error fetching payment" });
+  }
+});
+
+app.post("/api/payments/:paymentId/process", auth, async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const { cardDetails } = req.body;
+
+    const payment = await Payment.findOne({ _id: paymentId, userId: req.user.id });
+    if (!payment) {
+      return res.status(404).json({ message: "Payment not found" });
+    }
+
+    if (payment.status !== 'pending') {
+      return res.status(400).json({ message: "Payment already processed" });
+    }
+
+    // Process payment and update user's rented books
+    const user = await User.findOne({ id: req.user.id });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Add books to user's rentedBooks
+    const rentedBooks = payment.items.map(item => ({
+      bookId: item.bookId,
+      rentalDuration: item.rentalDuration,
+      rentStartDate: new Date(),
+      rentEndDate: new Date(Date.now() + item.rentalDuration * 24 * 60 * 60 * 1000)
+    }));
+
+    user.rentedBooks.push(...rentedBooks);
+    await user.save();
+
+    // Update payment status
+    payment.status = 'completed';
+    payment.processedAt = new Date();
+    await payment.save();
+
+    // Clear user's cart
+    await Cart.findOneAndUpdate(
+      { userId: req.user.id },
+      { $set: { items: [] } }
+    );
+
+    res.json({ message: "Payment processed successfully", payment });
+  } catch (error) {
+    console.error("Error processing payment:", error);
+    res.status(500).json({ message: "Error processing payment" });
   }
 });
 

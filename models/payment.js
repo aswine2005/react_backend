@@ -1,26 +1,28 @@
 const mongoose = require('mongoose');
 
-const paymentSchema = new mongoose.Schema({
-    id: { type: String, required: true, unique: true },
-    userId: { type: String, required: true },
+const paymentItemSchema = new mongoose.Schema({
     bookId: { type: String, required: true },
-    amount: { type: Number, required: true },
-    paymentMethod: { 
-        type: String, 
-        required: true,
-        enum: ['credit_card', 'debit_card', 'upi', 'net_banking']
-    },
+    rentalDuration: { type: Number, required: true }
+}, { _id: false });
+
+const paymentSchema = new mongoose.Schema({
+    userId: { type: String, required: true },
+    items: [paymentItemSchema],
+    totalAmount: { type: Number, required: true },
     status: {
         type: String,
         required: true,
         enum: ['pending', 'completed', 'failed'],
         default: 'pending'
     },
-    transactionId: { type: String },
-    rentDuration: { type: Number, required: true }, // in days
-    rentStartDate: { type: Date, default: Date.now },
-    rentEndDate: { type: Date, required: true },
-    createdAt: { type: Date, default: Date.now }
+    cardDetails: {
+        number: String,
+        expiryMonth: String,
+        expiryYear: String,
+        cvv: String
+    },
+    createdAt: { type: Date, default: Date.now },
+    processedAt: { type: Date }
 });
 
 const Payment = mongoose.model('Payment', paymentSchema);

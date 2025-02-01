@@ -1,13 +1,20 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+const rentedBookSchema = new mongoose.Schema({
+    bookId: { type: String, required: true },
+    rentalDuration: { type: Number, required: true },
+    rentStartDate: { type: Date, required: true },
+    rentEndDate: { type: Date, required: true }
+}, { _id: false });
+
 const userSchema = new mongoose.Schema({
     id: { type: String, required: true, unique: true },
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     cart: [{ type: String }], // Array of book IDs
-    rentedBooks: [{ type: String }], // Array of book IDs
+    rentedBooks: [rentedBookSchema],
     phoneNo: { type: String },
     role: { type: String, enum: ['user', 'admin'], default: 'user' }
 });
