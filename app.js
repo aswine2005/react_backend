@@ -236,24 +236,35 @@ app.get("/api/books/:id", async (req, res) => {
 // Cart Routes
 app.get("/api/cart", auth, async (req, res) => {
   try {
-    let cart = await Cart.findOne({ userId: req.user.id });
-    if (!cart) {
-      cart = { items: [] };
+    // Find cart for user
+    const cart = await Cart.findOne({ userId: req.user.id });
+    if (!cart || !cart.items.length) {
+      return res.json({ items: [] });
     }
 
-    // Fetch book details for each cart item
+    // Get book details for each cart item
     const cartItemsWithDetails = await Promise.all(
       cart.items.map(async (item) => {
         const book = await Book.findOne({ id: item.bookId });
+        if (!book) {
+          return null;
+        }
         return {
-          bookId: item.bookId,
-          rentalDuration: item.rentalDuration,
-          book
+          bookId: book.id,
+          title: book.title,
+          author: book.author,
+          imageUrl: book.imageUrl,
+          rentPrice: book.rentPrice,
+          rentalDuration: item.rentalDuration || 1,
+          available: book.available && book.quantity > 0
         };
       })
     );
 
-    res.json({ items: cartItemsWithDetails });
+    // Filter out any null items (books that weren't found)
+    const validItems = cartItemsWithDetails.filter(item => item !== null);
+
+    res.json({ items: validItems });
   } catch (error) {
     console.error("Error fetching cart:", error);
     res.status(500).json({ message: "Error fetching cart" });
@@ -264,10 +275,14 @@ app.post("/api/cart/add", auth, async (req, res) => {
   try {
     const { bookId, rentalDuration = 1 } = req.body;
     
-    // Validate book exists
+    // Validate book exists and is available
     const book = await Book.findOne({ id: bookId });
     if (!book) {
       return res.status(404).json({ message: "Book not found" });
+    }
+
+    if (!book.available || book.quantity <= 0) {
+      return res.status(400).json({ message: "Book is not available" });
     }
 
     // Find or create cart
@@ -283,11 +298,34 @@ app.post("/api/cart/add", auth, async (req, res) => {
     }
 
     // Add book to cart
-    cart.items.push({ bookId, rentalDuration });
-    cart.updatedAt = new Date();
+    cart.items.push({ 
+      bookId, 
+      rentalDuration: Math.max(1, Math.min(30, rentalDuration)) // Limit duration between 1 and 30 days
+    });
+    
     await cart.save();
 
-    res.status(201).json({ message: "Book added to cart", cart });
+    // Return updated cart with book details
+    const updatedCart = await Cart.findOne({ userId: req.user.id });
+    const cartItemsWithDetails = await Promise.all(
+      updatedCart.items.map(async (item) => {
+        const bookDetails = await Book.findOne({ id: item.bookId });
+        return {
+          bookId: bookDetails.id,
+          title: bookDetails.title,
+          author: bookDetails.author,
+          imageUrl: bookDetails.imageUrl,
+          rentPrice: bookDetails.rentPrice,
+          rentalDuration: item.rentalDuration,
+          available: bookDetails.available && bookDetails.quantity > 0
+        };
+      })
+    );
+
+    res.status(201).json({ 
+      message: "Book added to cart",
+      items: cartItemsWithDetails
+    });
   } catch (error) {
     console.error("Error adding to cart:", error);
     res.status(500).json({ message: "Error adding to cart" });
@@ -467,23 +505,49 @@ app.get("/api/books/:bookId/feedback", async (req, res) => {
 // Payment Routes
 app.post("/api/payments/create", auth, async (req, res) => {
   try {
+    console.log('Payment creation request:', {
+      userId: req.user.id,
+      body: req.body
+    });
+
     const { items, totalAmount } = req.body;
 
-    if (!items || !items.length) {
+    // Validate request body
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ message: "Invalid items format" });
+    }
+
+    if (!items.length) {
       return res.status(400).json({ message: "No items provided" });
+    }
+
+    if (typeof totalAmount !== 'number' || totalAmount <= 0) {
+      return res.status(400).json({ message: "Invalid total amount" });
     }
 
     // Validate all books exist and are available
     const bookValidations = await Promise.all(
       items.map(async (item) => {
-        const book = await Book.findOne({ id: item.bookId });
-        if (!book) {
-          return { valid: false, message: `Book ${item.bookId} not found` };
+        try {
+          const book = await Book.findOne({ id: item.bookId });
+          console.log('Book validation:', {
+            bookId: item.bookId,
+            found: !!book,
+            available: book?.available,
+            quantity: book?.quantity
+          });
+
+          if (!book) {
+            return { valid: false, message: `Book ${item.bookId} not found` };
+          }
+          if (!book.available || book.quantity <= 0) {
+            return { valid: false, message: `Book ${item.bookId} is not available` };
+          }
+          return { valid: true, book };
+        } catch (error) {
+          console.error('Error validating book:', error);
+          return { valid: false, message: `Error validating book ${item.bookId}` };
         }
-        if (!book.available || book.quantity <= 0) {
-          return { valid: false, message: `Book ${item.bookId} is not available` };
-        }
-        return { valid: true, book };
       })
     );
 
@@ -504,7 +568,10 @@ app.post("/api/payments/create", auth, async (req, res) => {
       createdAt: new Date()
     });
 
+    console.log('Creating payment:', payment);
+
     await payment.save();
+    console.log('Payment saved successfully');
 
     // Return the payment ID
     res.status(201).json({ 
@@ -513,7 +580,10 @@ app.post("/api/payments/create", auth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error creating payment:", error);
+    console.error("Error creating payment:", {
+      error: error.message,
+      stack: error.stack
+    });
     res.status(500).json({ 
       message: "Error creating payment",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
