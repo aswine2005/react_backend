@@ -1,12 +1,29 @@
 const mongoose = require('mongoose');
 
 const paymentItemSchema = new mongoose.Schema({
-    bookId: { type: String, required: true },
-    rentalDuration: { type: Number, required: true, min: 1 }
+    bookId: { 
+        type: String, 
+        required: true 
+    },
+    rentalDuration: { 
+        type: Number, 
+        required: true,
+        min: [1, 'Rental duration must be at least 1 day'],
+        max: [30, 'Rental duration cannot exceed 30 days']
+    },
+    rentPrice: {
+        type: Number,
+        required: true,
+        min: [0, 'Rent price cannot be negative']
+    }
 }, { _id: false });
 
 const paymentSchema = new mongoose.Schema({
-    userId: { type: String, required: true },
+    userId: { 
+        type: String, 
+        required: true,
+        index: true
+    },
     items: {
         type: [paymentItemSchema],
         required: true,
@@ -15,7 +32,18 @@ const paymentSchema = new mongoose.Schema({
     totalAmount: { 
         type: Number, 
         required: true,
-        min: [0, 'Total amount cannot be negative']
+        min: [0, 'Total amount cannot be negative'],
+        validate: {
+            validator: function(value) {
+                // Calculate total from items
+                const calculatedTotal = this.items.reduce((total, item) => {
+                    return total + (item.rentPrice * item.rentalDuration);
+                }, 0);
+                // Allow for small floating point differences
+                return Math.abs(calculatedTotal - value) < 0.01;
+            },
+            message: 'Total amount must match the sum of item prices'
+        }
     },
     status: {
         type: String,
@@ -23,17 +51,27 @@ const paymentSchema = new mongoose.Schema({
         enum: ['pending', 'completed', 'failed'],
         default: 'pending'
     },
-    cardDetails: {
-        number: String,
-        expiryMonth: String,
-        expiryYear: String,
-        cvv: String
+    paymentMethod: {
+        type: String,
+        enum: ['card', 'upi', 'netbanking'],
+        required: false
     },
-    createdAt: { type: Date, default: Date.now },
-    processedAt: { type: Date }
+    transactionId: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
+    createdAt: { 
+        type: Date, 
+        default: Date.now,
+        index: true
+    },
+    processedAt: { 
+        type: Date 
+    }
 });
 
-// Add indexes for better query performance
+// Add compound index for better query performance
 paymentSchema.index({ userId: 1, status: 1 });
 paymentSchema.index({ createdAt: -1 });
 

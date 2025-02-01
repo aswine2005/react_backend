@@ -505,36 +505,75 @@ app.get("/api/books/:bookId/feedback", async (req, res) => {
 // Payment Routes
 app.post("/api/payments/create", auth, async (req, res) => {
   try {
+    const { items, totalAmount } = req.body;
     console.log('Payment creation request:', {
       userId: req.user.id,
-      body: req.body
+      items,
+      totalAmount
     });
 
-    const { items, totalAmount } = req.body;
-
-    // Validate request body
+    // Input validation
     if (!items || !Array.isArray(items)) {
+      console.log('Invalid items format:', items);
       return res.status(400).json({ message: "Invalid items format" });
     }
 
-    if (!items.length) {
+    if (items.length === 0) {
+      console.log('No items provided');
       return res.status(400).json({ message: "No items provided" });
     }
 
     if (typeof totalAmount !== 'number' || totalAmount <= 0) {
+      console.log('Invalid total amount:', totalAmount);
       return res.status(400).json({ message: "Invalid total amount" });
     }
 
+    // Log each item for debugging
+    items.forEach((item, index) => {
+      console.log(`Item ${index}:`, {
+        bookId: item.bookId,
+        rentalDuration: item.rentalDuration,
+        rentPrice: item.rentPrice
+      });
+    });
+
+    // Calculate expected total
+    const calculatedTotal = items.reduce((total, item) => {
+      const itemTotal = item.rentPrice * item.rentalDuration;
+      console.log(`Item total for ${item.bookId}:`, {
+        rentPrice: item.rentPrice,
+        duration: item.rentalDuration,
+        itemTotal
+      });
+      return total + itemTotal;
+    }, 0);
+
+    console.log('Total amount comparison:', {
+      calculated: calculatedTotal,
+      received: totalAmount,
+      difference: Math.abs(calculatedTotal - totalAmount)
+    });
+
+    // Verify total amount matches
+    if (Math.abs(calculatedTotal - totalAmount) > 0.01) {
+      return res.status(400).json({ 
+        message: "Total amount mismatch",
+        expected: calculatedTotal,
+        received: totalAmount
+      });
+    }
+
     // Validate all books exist and are available
-    const bookValidations = await Promise.all(
+    const bookValidationResults = await Promise.all(
       items.map(async (item) => {
         try {
           const book = await Book.findOne({ id: item.bookId });
-          console.log('Book validation:', {
-            bookId: item.bookId,
+          console.log(`Book validation for ${item.bookId}:`, {
             found: !!book,
             available: book?.available,
-            quantity: book?.quantity
+            quantity: book?.quantity,
+            rentPrice: book?.rentPrice,
+            itemRentPrice: item.rentPrice
           });
 
           if (!book) {
@@ -543,16 +582,23 @@ app.post("/api/payments/create", auth, async (req, res) => {
           if (!book.available || book.quantity <= 0) {
             return { valid: false, message: `Book ${item.bookId} is not available` };
           }
+          if (Math.abs(book.rentPrice - item.rentPrice) > 0.01) {
+            return { 
+              valid: false, 
+              message: `Price mismatch for book ${item.bookId}. Expected: ${book.rentPrice}, Got: ${item.rentPrice}` 
+            };
+          }
           return { valid: true, book };
         } catch (error) {
-          console.error('Error validating book:', error);
-          return { valid: false, message: `Error validating book ${item.bookId}` };
+          console.error(`Error validating book ${item.bookId}:`, error);
+          return { valid: false, message: `Error validating book ${item.bookId}: ${error.message}` };
         }
       })
     );
 
-    const invalidBook = bookValidations.find(validation => !validation.valid);
+    const invalidBook = bookValidationResults.find(result => !result.valid);
     if (invalidBook) {
+      console.log('Invalid book found:', invalidBook);
       return res.status(400).json({ message: invalidBook.message });
     }
 
@@ -561,29 +607,66 @@ app.post("/api/payments/create", auth, async (req, res) => {
       userId: req.user.id,
       items: items.map(item => ({
         bookId: item.bookId,
-        rentalDuration: item.rentalDuration
+        rentalDuration: item.rentalDuration,
+        rentPrice: item.rentPrice
       })),
       totalAmount,
       status: 'pending',
       createdAt: new Date()
     });
 
-    console.log('Creating payment:', payment);
+    console.log('Creating payment:', {
+      userId: payment.userId,
+      itemCount: payment.items.length,
+      totalAmount: payment.totalAmount
+    });
 
     await payment.save();
-    console.log('Payment saved successfully');
+    console.log('Payment saved successfully:', payment._id);
 
-    // Return the payment ID
+    // Update book quantities
+    try {
+      await Promise.all(
+        items.map(async (item) => {
+          const book = await Book.findOne({ id: item.bookId });
+          book.quantity -= 1;
+          book.available = book.quantity > 0;
+          await book.save();
+          console.log(`Updated quantity for book ${item.bookId}:`, {
+            newQuantity: book.quantity,
+            available: book.available
+          });
+        })
+      );
+    } catch (error) {
+      console.error('Error updating book quantities:', error);
+      // Rollback payment creation
+      await Payment.deleteOne({ _id: payment._id });
+      throw new Error('Failed to update book quantities');
+    }
+
+    // Return success response
     res.status(201).json({ 
       message: "Payment created successfully",
-      paymentId: payment._id 
+      paymentId: payment._id,
+      totalAmount: payment.totalAmount
     });
 
   } catch (error) {
     console.error("Error creating payment:", {
-      error: error.message,
-      stack: error.stack
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
     });
+
+    // Check for specific error types
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ 
+        message: "Validation error",
+        details: Object.values(error.errors).map(err => err.message)
+      });
+    }
+
     res.status(500).json({ 
       message: "Error creating payment",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
