@@ -236,38 +236,47 @@ app.get("/api/books/:id", async (req, res) => {
 // Cart Routes
 app.get("/api/cart", auth, async (req, res) => {
   try {
-    // Find cart for user
-    const cart = await Cart.findOne({ userId: req.user.id });
-    if (!cart || !cart.items.length) {
-      return res.json({ items: [] });
+    console.log('Fetching cart for user:', req.user.id);
+    
+    const cart = await Cart.findOne({ userId: req.user.id }).populate({
+      path: 'items.book',
+      select: 'title author rentPrice imageUrl available quantity'
+    });
+
+    if (!cart) {
+      console.log('No cart found for user, creating new cart');
+      return res.status(200).json({ 
+        items: [],
+        message: 'Cart is empty' 
+      });
     }
 
-    // Get book details for each cart item
-    const cartItemsWithDetails = await Promise.all(
-      cart.items.map(async (item) => {
-        const book = await Book.findOne({ id: item.bookId });
-        if (!book) {
-          return null;
-        }
-        return {
-          bookId: item.bookId,
-          title: book.title,
-          author: book.author,
-          imageUrl: book.imageUrl,
-          rentPrice: book.rentPrice || 0,
-          rentalDuration: item.rentalDuration || 1,
-          available: book.available && book.quantity > 0
-        };
-      })
-    );
+    // Validate and filter cart items
+    const validItems = cart.items.filter(item => 
+      item.book && item.book.available && item.book.quantity > 0
+    ).map(item => ({
+      bookId: item.book.id,
+      title: item.book.title,
+      author: item.book.author,
+      rentPrice: item.book.rentPrice,
+      imageUrl: item.book.imageUrl,
+      rentalDuration: item.rentalDuration || 1
+    }));
 
-    // Filter out any null items (books that weren't found)
-    const validItems = cartItemsWithDetails.filter(item => item !== null);
+    console.log('Cart items found:', {
+      userId: req.user.id,
+      itemCount: validItems.length
+    });
 
-    res.json({ items: validItems });
+    res.status(200).json({ 
+      items: validItems 
+    });
   } catch (error) {
-    console.error("Error fetching cart:", error);
-    res.status(500).json({ message: "Error fetching cart" });
+    console.error('Error fetching cart:', error);
+    res.status(500).json({ 
+      message: 'Error retrieving cart', 
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined 
+    });
   }
 });
 
@@ -504,107 +513,160 @@ app.get("/api/books/:bookId/feedback", async (req, res) => {
 
 // Payment Routes
 app.post("/api/payments/create", auth, async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
+  let session;
   try {
-    const { items, totalAmount } = req.body;
-    console.log('Payment creation request:', {
+    // Start a mongoose session for transaction
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    // Log entire request body for debugging
+    console.log('Full Payment Creation Request:', {
       userId: req.user.id,
-      items,
-      totalAmount
+      body: req.body,
+      headers: req.headers
     });
 
-    // Input validation
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: "No items provided" });
-    }
+    const { items, totalAmount } = req.body;
 
-    if (typeof totalAmount !== 'number' || totalAmount <= 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: "Invalid total amount" });
-    }
-
-    // Calculate expected total
-    const calculatedTotal = items.reduce((total, item) => {
-      const itemTotal = item.rentPrice * item.rentalDuration;
-      return total + itemTotal;
-    }, 0);
-
-    // Verify total amount matches
-    if (Math.abs(calculatedTotal - totalAmount) > 0.01) {
+    // Validate request body structure
+    if (!items || !Array.isArray(items)) {
+      console.error('Invalid items format:', items);
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ 
-        message: "Total amount mismatch",
-        expected: calculatedTotal,
-        received: totalAmount
+        message: "Invalid items format", 
+        details: "Items must be an array" 
       });
     }
 
-    // Validate all books exist and are available
-    const bookValidationResults = await Promise.all(
-      items.map(async (item) => {
-        const book = await Book.findOne({ id: item.bookId });
-        
-        if (!book) {
-          return { 
-            valid: false, 
-            message: `Book ${item.bookId} not found` 
-          };
+    if (items.length === 0) {
+      console.error('No items provided');
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: "No items provided", 
+        details: "Cart cannot be empty" 
+      });
+    }
+
+    // Validate total amount
+    if (typeof totalAmount !== 'number' || totalAmount <= 0) {
+      console.error('Invalid total amount:', totalAmount);
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: "Invalid total amount", 
+        details: "Total amount must be a positive number" 
+      });
+    }
+
+    // Detailed validation for each item
+    const itemValidationErrors = [];
+    const validatedItems = await Promise.all(
+      items.map(async (item, index) => {
+        // Validate item structure
+        if (!item.bookId || !item.rentPrice || !item.rentalDuration) {
+          itemValidationErrors.push(`Item at index ${index} is missing required fields`);
+          return null;
         }
-        
-        if (!book.available || book.quantity <= 0) {
+
+        try {
+          // Find book and validate
+          const book = await Book.findOne({ id: item.bookId });
+          
+          if (!book) {
+            itemValidationErrors.push(`Book ${item.bookId} not found`);
+            return null;
+          }
+
+          // Validate book availability
+          if (!book.available || book.quantity <= 0) {
+            itemValidationErrors.push(`Book ${item.bookId} is not available`);
+            return null;
+          }
+
+          // Validate price
+          if (Math.abs(book.rentPrice - item.rentPrice) > 0.01) {
+            itemValidationErrors.push(`Price mismatch for book ${item.bookId}. Expected: ${book.rentPrice}, Got: ${item.rentPrice}`);
+            return null;
+          }
+
           return { 
-            valid: false, 
-            message: `Book ${item.bookId} is not available` 
+            book, 
+            item: {
+              bookId: item.bookId,
+              rentalDuration: item.rentalDuration,
+              rentPrice: item.rentPrice
+            }
           };
+        } catch (error) {
+          console.error(`Error validating book ${item.bookId}:`, error);
+          itemValidationErrors.push(`Validation error for book ${item.bookId}: ${error.message}`);
+          return null;
         }
-        
-        if (Math.abs(book.rentPrice - item.rentPrice) > 0.01) {
-          return { 
-            valid: false, 
-            message: `Price mismatch for book ${item.bookId}. Expected: ${book.rentPrice}, Got: ${item.rentPrice}` 
-          };
-        }
-        
-        return { valid: true, book };
       })
     );
 
-    const invalidBook = bookValidationResults.find(result => !result.valid);
-    if (invalidBook) {
+    // Check for validation errors
+    if (itemValidationErrors.length > 0) {
+      console.error('Item validation errors:', itemValidationErrors);
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ message: invalidBook.message });
+      return res.status(400).json({ 
+        message: "Item validation failed", 
+        details: itemValidationErrors 
+      });
+    }
+
+    // Calculate total from validated items
+    const calculatedTotal = validatedItems.reduce((total, validItem) => {
+      return total + (validItem.item.rentPrice * validItem.item.rentalDuration);
+    }, 0);
+
+    // Verify total amount
+    if (Math.abs(calculatedTotal - totalAmount) > 0.01) {
+      console.error('Total amount mismatch', {
+        calculated: calculatedTotal,
+        provided: totalAmount
+      });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: "Total amount mismatch", 
+        details: {
+          calculated: calculatedTotal,
+          provided: totalAmount
+        }
+      });
     }
 
     // Create payment record
     const payment = new Payment({
       userId: req.user.id,
-      items: items.map(item => ({
-        bookId: item.bookId,
-        rentalDuration: item.rentalDuration,
-        rentPrice: item.rentPrice
-      })),
+      items: validatedItems.map(validItem => validItem.item),
       totalAmount,
       status: 'pending',
       createdAt: new Date()
     });
 
+    // Save payment
     await payment.save({ session });
 
     // Update book quantities
     await Promise.all(
-      items.map(async (item) => {
-        const book = await Book.findOne({ id: item.bookId });
+      validatedItems.map(async (validItem) => {
+        const book = await Book.findOne({ id: validItem.item.bookId });
         book.quantity -= 1;
         book.available = book.quantity > 0;
         await book.save({ session });
       })
+    );
+
+    // Clear user's cart
+    await Cart.findOneAndUpdate(
+      { userId: req.user.id }, 
+      { items: [] }, 
+      { session }
     );
 
     // Commit transaction
@@ -619,27 +681,32 @@ app.post("/api/payments/create", auth, async (req, res) => {
     });
 
   } catch (error) {
-    // Rollback transaction in case of error
-    await session.abortTransaction();
-    session.endSession();
-
-    console.error("Error creating payment:", {
+    // Log full error details
+    console.error("Comprehensive Payment Creation Error:", {
       name: error.name,
       message: error.message,
-      stack: error.stack
+      stack: error.stack,
+      details: error.errors ? Object.values(error.errors).map(err => err.message) : null
     });
 
-    // Check for specific error types
-    if (error.name === 'ValidationError') {
-      return res.status(400).json({ 
-        message: "Validation error",
-        details: Object.values(error.errors).map(err => err.message)
-      });
+    // Attempt to abort transaction if it exists
+    if (session) {
+      try {
+        await session.abortTransaction();
+        session.endSession();
+      } catch (sessionError) {
+        console.error('Error aborting transaction:', sessionError);
+      }
     }
 
+    // Detailed error response
     res.status(500).json({ 
-      message: "Error creating payment",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: "Internal server error during payment creation",
+      error: process.env.NODE_ENV === 'development' ? {
+        name: error.name,
+        message: error.message,
+        details: error.errors ? Object.values(error.errors).map(err => err.message) : null
+      } : undefined
     });
   }
 });
@@ -706,6 +773,107 @@ app.post("/api/payments/:paymentId/process", auth, async (req, res) => {
   } catch (error) {
     console.error("Error processing payment:", error);
     res.status(500).json({ message: "Error processing payment" });
+  }
+});
+
+// Get Payment Details Route
+app.get("/api/payments/:paymentId", auth, async (req, res) => {
+  try {
+    const payment = await Payment.findOne({ 
+      _id: req.params.paymentId, 
+      userId: req.user.id 
+    }).populate({
+      path: 'items.book',
+      select: 'title author imageUrl'
+    });
+
+    if (!payment) {
+      return res.status(404).json({ 
+        message: 'Payment not found' 
+      });
+    }
+
+    // Format payment details for frontend
+    const paymentDetails = {
+      _id: payment._id,
+      totalAmount: payment.totalAmount,
+      status: payment.status,
+      createdAt: payment.createdAt,
+      items: payment.items.map(item => ({
+        bookId: item.book._id,
+        title: item.book.title,
+        author: item.book.author,
+        imageUrl: item.book.imageUrl,
+        rentPrice: item.rentPrice,
+        rentalDuration: item.rentalDuration
+      }))
+    };
+
+    res.status(200).json(paymentDetails);
+  } catch (error) {
+    console.error('Error fetching payment details:', error);
+    res.status(500).json({ 
+      message: 'Error retrieving payment details',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Generate Payment Receipt Route
+app.get("/api/payments/:paymentId/receipt", auth, async (req, res) => {
+  try {
+    const payment = await Payment.findOne({ 
+      _id: req.params.paymentId, 
+      userId: req.user.id 
+    }).populate({
+      path: 'items.book',
+      select: 'title author'
+    });
+
+    if (!payment) {
+      return res.status(404).json({ 
+        message: 'Payment not found' 
+      });
+    }
+
+    // Use a PDF generation library like PDFKit
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument();
+
+    // Set response headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=payment_receipt_${payment._id}.pdf`);
+
+    // Pipe PDF to response
+    doc.pipe(res);
+
+    // PDF Content
+    doc.fontSize(25).text('Book Rental Receipt', { align: 'center' });
+    doc.moveDown();
+
+    doc.fontSize(12)
+       .text(`Payment ID: ${payment._id}`)
+       .text(`Date: ${payment.createdAt.toLocaleString()}`)
+       .text(`Total Amount: ₹${payment.totalAmount.toFixed(2)}`)
+       .text(`Status: ${payment.status}`);
+
+    doc.moveDown();
+    doc.fontSize(15).text('Rented Books', { underline: true });
+
+    payment.items.forEach((item, index) => {
+      doc.fontSize(12)
+         .text(`${index + 1}. ${item.book.title} by ${item.book.author}`)
+         .text(`   Rental Duration: ${item.rentalDuration} days`)
+         .text(`   Price: ₹${(item.rentPrice * item.rentalDuration).toFixed(2)}`);
+    });
+
+    doc.end();
+  } catch (error) {
+    console.error('Error generating payment receipt:', error);
+    res.status(500).json({ 
+      message: 'Error generating receipt',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
