@@ -315,9 +315,8 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
     const { rentalDuration } = req.body;
     const { bookId } = req.params;
 
-    const cart = await Cart.findOne({ 
-      user: new mongoose.Types.ObjectId(req.user.id) 
-    });
+    // Find cart using mongoId
+    const cart = await Cart.findOne({ user: req.user.mongoId });
 
     if (!cart) {
       return res.status(404).json({ 
@@ -326,6 +325,16 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
       });
     }
 
+    // Find the book to get its price
+    const book = await Book.findById(bookId);
+    if (!book) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Book not found' 
+      });
+    }
+
+    // Find and update the cart item
     const cartItem = cart.items.find(item => 
       item.book.toString() === bookId
     );
@@ -340,7 +349,6 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
     cartItem.rentalDuration = rentalDuration;
     
     // Recalculate total amount
-    const book = await Book.findById(bookId);
     cart.totalAmount = cart.items.reduce((total, item) => {
       return total + (book.rentPrice * item.rentalDuration);
     }, 0);
@@ -357,7 +365,8 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
     console.error('Cart update error:', error);
     res.status(500).json({ 
       success: false,
-      message: 'Error updating cart' 
+      message: 'Error updating cart',
+      error: error.message 
     });
   }
 });
@@ -366,9 +375,9 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
 app.delete("/api/cart/remove/:bookId", auth, async (req, res) => {
   try {
     const { bookId } = req.params;
-    const cart = await Cart.findOne({ 
-      user: new mongoose.Types.ObjectId(req.user.id) 
-    });
+
+    // Find cart using mongoId
+    const cart = await Cart.findOne({ user: req.user.mongoId });
     
     if (!cart) {
       return res.status(404).json({ 
@@ -377,9 +386,18 @@ app.delete("/api/cart/remove/:bookId", auth, async (req, res) => {
       });
     }
 
+    // Remove the item
     cart.items = cart.items.filter(item => 
       item.book.toString() !== bookId
     );
+
+    // Recalculate total amount
+    const book = await Book.findById(bookId);
+    if (book) {
+      cart.totalAmount = cart.items.reduce((total, item) => {
+        return total + (book.rentPrice * item.rentalDuration);
+      }, 0);
+    }
 
     await cart.save();
     await cart.populate('items.book');
@@ -393,7 +411,8 @@ app.delete("/api/cart/remove/:bookId", auth, async (req, res) => {
     console.error('Cart remove error:', error);
     res.status(500).json({ 
       success: false,
-      message: 'Error removing book from cart' 
+      message: 'Error removing book from cart',
+      error: error.message 
     });
   }
 });
@@ -417,9 +436,10 @@ app.put("/api/users/profile/update", auth, async (req, res) => {
     await user.save();
 
     // Clear user's cart after successful rental
-    await Cart.findOneAndDelete({ userId: req.user.id });
+    await Cart.findOneAndDelete({ user: req.user.mongoId });
 
     res.json({ 
+      success: true,
       message: "Profile updated successfully",
       user: {
         id: user.id,
@@ -431,7 +451,11 @@ app.put("/api/users/profile/update", auth, async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating profile:", error);
-    res.status(500).json({ message: "Error updating profile" });
+    res.status(500).json({ 
+      success: false,
+      message: "Error updating profile",
+      error: error.message 
+    });
   }
 });
 
