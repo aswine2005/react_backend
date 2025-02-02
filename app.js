@@ -493,199 +493,91 @@ app.get("/api/books/:bookId/feedback", async (req, res) => {
 app.post("/api/payments/create", auth, async (req, res) => {
   let session;
   try {
-    // Start a mongoose session for transaction
     session = await mongoose.startSession();
     session.startTransaction();
 
-    // Log entire request body for debugging
-    console.log('Full Payment Creation Request:', {
-      userId: req.user.id,
-      body: req.body,
-      headers: req.headers
-    });
-
-    const { items, totalAmount } = req.body;
-
-    // Validate request body structure
-    if (!items || !Array.isArray(items)) {
-      console.error('Invalid items format:', items);
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ 
-        message: "Invalid items format", 
-        details: "Items must be an array" 
-      });
+    // Get user's cart
+    const cart = await Cart.findOne({ userId: req.user.id }).populate('items.bookId');
+    if (!cart || cart.items.length === 0) {
+      return res.status(400).json({ message: "Cart is empty" });
     }
 
-    if (items.length === 0) {
-      console.error('No items provided');
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ 
-        message: "No items provided", 
-        details: "Cart cannot be empty" 
-      });
-    }
-
-    // Validate total amount
-    if (typeof totalAmount !== 'number' || totalAmount <= 0) {
-      console.error('Invalid total amount:', totalAmount);
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ 
-        message: "Invalid total amount", 
-        details: "Total amount must be a positive number" 
-      });
-    }
-
-    // Detailed validation for each item
-    const itemValidationErrors = [];
-    const validatedItems = await Promise.all(
-      items.map(async (item, index) => {
-        // Validate item structure
-        if (!item.bookId || !item.rentPrice || !item.rentalDuration) {
-          itemValidationErrors.push(`Item at index ${index} is missing required fields`);
-          return null;
-        }
-
-        try {
-          // Find book and validate
-          const book = await Book.findOne({ id: item.bookId });
-          
-          if (!book) {
-            itemValidationErrors.push(`Book ${item.bookId} not found`);
-            return null;
-          }
-
-          // Validate book availability
-          if (!book.available || book.quantity <= 0) {
-            itemValidationErrors.push(`Book ${item.bookId} is not available`);
-            return null;
-          }
-
-          // Validate price
-          if (Math.abs(book.rentPrice - item.rentPrice) > 0.01) {
-            itemValidationErrors.push(`Price mismatch for book ${item.bookId}. Expected: ${book.rentPrice}, Got: ${item.rentPrice}`);
-            return null;
-          }
-
-          return { 
-            book, 
-            item: {
-              bookId: item.bookId,
-              rentalDuration: item.rentalDuration,
-              rentPrice: item.rentPrice
-            }
-          };
-        } catch (error) {
-          console.error(`Error validating book ${item.bookId}:`, error);
-          itemValidationErrors.push(`Validation error for book ${item.bookId}: ${error.message}`);
-          return null;
-        }
-      })
-    );
-
-    // Check for validation errors
-    if (itemValidationErrors.length > 0) {
-      console.error('Item validation errors:', itemValidationErrors);
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ 
-        message: "Item validation failed", 
-        details: itemValidationErrors 
-      });
-    }
-
-    // Calculate total from validated items
-    const calculatedTotal = validatedItems.reduce((total, validItem) => {
-      return total + (validItem.item.rentPrice * validItem.item.rentalDuration);
+    // Calculate total amount
+    const totalAmount = cart.items.reduce((total, item) => {
+      return total + (item.bookId.rentPrice * item.rentalDuration);
     }, 0);
-
-    // Verify total amount
-    if (Math.abs(calculatedTotal - totalAmount) > 0.01) {
-      console.error('Total amount mismatch', {
-        calculated: calculatedTotal,
-        provided: totalAmount
-      });
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ 
-        message: "Total amount mismatch", 
-        details: {
-          calculated: calculatedTotal,
-          provided: totalAmount
-        }
-      });
-    }
 
     // Create payment record
     const payment = new Payment({
       userId: req.user.id,
-      items: validatedItems.map(validItem => validItem.item),
+      items: cart.items.map(item => ({
+        bookId: item.bookId.id,
+        rentalDuration: item.rentalDuration,
+        priceAtPurchase: item.bookId.rentPrice
+      })),
       totalAmount,
-      status: 'pending',
-      createdAt: new Date()
+      status: 'completed',
+      paymentMethod: 'direct'
     });
 
-    // Save payment
     await payment.save({ session });
 
+    // Update user's rented books
+    const user = await User.findOne({ id: req.user.id });
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Add books to user's rentedBooks
+    const currentDate = new Date();
+    const rentedBooks = cart.items.map(item => ({
+      bookId: item.bookId.id,
+      rentedDate: currentDate,
+      returnDate: new Date(currentDate.getTime() + (item.rentalDuration * 24 * 60 * 60 * 1000)),
+      status: 'active'
+    }));
+
+    user.rentedBooks.push(...rentedBooks);
+    await user.save({ session });
+
     // Update book quantities
-    await Promise.all(
-      validatedItems.map(async (validItem) => {
-        const book = await Book.findOne({ id: validItem.item.bookId });
-        book.quantity -= 1;
-        book.available = book.quantity > 0;
-        await book.save({ session });
-      })
-    );
+    for (const item of cart.items) {
+      await Book.findOneAndUpdate(
+        { id: item.bookId.id },
+        { $inc: { quantity: -1 } },
+        { session }
+      );
+    }
 
     // Clear user's cart
-    await Cart.findOneAndUpdate(
-      { userId: req.user.id }, 
-      { items: [] }, 
-      { session }
-    );
+    await Cart.findOneAndDelete({ userId: req.user.id }, { session });
 
-    // Commit transaction
     await session.commitTransaction();
-    session.endSession();
-
-    // Return success response
+    
     res.status(201).json({ 
-      message: "Payment created successfully",
+      message: "Payment processed successfully",
       paymentId: payment._id,
-      totalAmount: payment.totalAmount
+      totalAmount,
+      rentedBooks
     });
 
   } catch (error) {
-    // Log full error details
-    console.error("Comprehensive Payment Creation Error:", {
+    if (session) {
+      await session.abortTransaction();
+    }
+    console.error("Payment Processing Error:", {
       name: error.name,
       message: error.message,
-      stack: error.stack,
-      details: error.errors ? Object.values(error.errors).map(err => err.message) : null
+      stack: error.stack
     });
-
-    // Attempt to abort transaction if it exists
-    if (session) {
-      try {
-        await session.abortTransaction();
-        session.endSession();
-      } catch (sessionError) {
-        console.error('Error aborting transaction:', sessionError);
-      }
-    }
-
-    // Detailed error response
     res.status(500).json({ 
-      message: "Internal server error during payment creation",
-      error: process.env.NODE_ENV === 'development' ? {
-        name: error.name,
-        message: error.message,
-        details: error.errors ? Object.values(error.errors).map(err => err.message) : null
-      } : undefined
+      message: "Error processing payment",
+      error: error.message 
     });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
   }
 });
 
@@ -748,6 +640,21 @@ app.post("/api/payments/:paymentId/process", auth, async (req, res) => {
     );
 
     res.json({ message: "Payment processed successfully", payment });
+  } catch (error) {
+    console.error("Error processing payment:", error);
+    res.status(500).json({ message: "Error processing payment" });
+  }
+});
+
+app.post("/api/payments/process", auth, async (req, res) => {
+  try {
+    const { name, cardNumber, expiryDate } = req.body;
+
+    // Store payment details in local storage
+    const paymentDetails = { name, cardNumber, expiryDate };
+    localStorage.setItem('paymentDetails', JSON.stringify(paymentDetails));
+
+    res.json({ message: "Payment details saved successfully" });
   } catch (error) {
     console.error("Error processing payment:", error);
     res.status(500).json({ message: "Error processing payment" });
