@@ -214,6 +214,13 @@ app.post("/api/cart/add", auth, async (req, res) => {
   try {
     const { bookId } = req.body;
     
+    if (!bookId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Book ID is required' 
+      });
+    }
+
     if (!mongoose.Types.ObjectId.isValid(bookId)) {
       return res.status(400).json({ 
         success: false,
@@ -278,7 +285,6 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
   } catch (error) {
     console.error('Cart add error:', error);
-    // Don't send 401 status which triggers logout
     res.status(500).json({ 
       success: false,
       message: 'Error adding book to cart',
