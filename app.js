@@ -14,25 +14,23 @@ const app = express();
 
 // CORS Configuration
 const corsOptions = {
-  origin: [
-    'http://localhost:5173',  // Vite development server
-    'http://localhost:3000',  // React development server
-    'http://127.0.0.1:5173'   // Alternative local address
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
   credentials: true,
-  optionsSuccessStatus: 200
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
 
-// Preflight request handler
-app.options('*', cors(corsOptions));
-
 // Middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Basic route for testing
+app.get('/test', (req, res) => {
+  res.json({ message: 'Backend server is running!' });
+});
 
 // MongoDB Atlas Connection
 const connectDB = async () => {
@@ -164,8 +162,11 @@ app.get("/api/books", async (req, res) => {
     const books = await Book.find({});
     res.json(books);
   } catch (error) {
-    console.error("Error fetching books:", error);
-    res.status(500).json({ message: "Error fetching books" });
+    console.error('Error fetching books:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching books' 
+    });
   }
 });
 
