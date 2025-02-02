@@ -14,18 +14,44 @@ const app = express();
 
 // CORS Configuration
 const corsOptions = {
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'https://your-frontend-domain.com'  // Add your deployed frontend domain
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  optionsSuccessStatus: 200
 };
 
-// Apply CORS middleware
+// Apply CORS middleware before other middlewares
 app.use(cors(corsOptions));
 
-// Middleware
+// Other middlewares
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Add headers middleware for additional CORS handling
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (corsOptions.origin.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).json({
+      body: "OK"
+    });
+  }
+  
+  next();
+});
 
 // Basic route for testing
 app.get('/test', (req, res) => {
@@ -164,13 +190,28 @@ app.get("/api/auth/profile", auth, async (req, res) => {
 // Books Routes
 app.get("/api/books", async (req, res) => {
   try {
-    const books = await Book.find({});
-    res.json(books);
+    const books = await Book.find({})
+      .select('_id title author description imageUrl category rentPrice quantity available rating')
+      .lean();
+
+    console.log('Fetched books:', books.length);
+
+    res.json({
+      success: true,
+      books: books.map(book => ({
+        ...book,
+        rating: book.rating || 0,
+        rentPrice: book.rentPrice || 0,
+        imageUrl: book.imageUrl || '/images/default-book.jpg',
+        available: book.available !== false
+      }))
+    });
   } catch (error) {
     console.error('Error fetching books:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Error fetching books' 
+      message: 'Error fetching books',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

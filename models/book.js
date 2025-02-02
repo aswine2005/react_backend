@@ -52,24 +52,31 @@ const bookSchema = new mongoose.Schema({
     },
     imageUrl: {
         type: String,
-        required: true
+        default: '/images/default-book.jpg'
     },
     rentPrice: {
         type: Number,
         required: true,
-        min: 0
+        min: 0,
+        default: 0
     },
     quantity: {
         type: Number,
         required: true,
         min: 0,
-        default: 1
+        default: 0
     },
     available: {
         type: Boolean,
         default: true
     },
     feedback: [feedbackSchema],
+    rating: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 5
+    },
     averageRating: {
         type: Number,
         default: 0,
@@ -81,8 +88,12 @@ const bookSchema = new mongoose.Schema({
         default: 0
     }
 }, {
-    timestamps: true
+    timestamps: true,
+    toJSON: { virtuals: true }
 });
+
+// Add index for better performance
+bookSchema.index({ title: 1, author: 1 });
 
 // Calculate average rating before saving
 bookSchema.pre('save', function(next) {
