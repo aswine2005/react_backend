@@ -120,9 +120,9 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    // Generate token
+    // Generate token using UUID
     const token = jwt.sign(
-      { userId: user._id },
+      { userId: user.id }, // Use UUID for token
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -131,6 +131,7 @@ app.post("/api/auth/login", async (req, res) => {
       message: "Login successful",
       user: {
         id: user.id,
+        _id: user._id, // Include MongoDB _id
         name: user.name,
         email: user.email,
         phoneNo: user.phoneNo
@@ -228,7 +229,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
     
     if (!cart) {
       cart = new Cart({ 
-        user: req.user.id, 
+        user: req.user.id, // This is now MongoDB _id from auth middleware
         items: [],
         totalAmount: 0
       });

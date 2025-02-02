@@ -1,37 +1,46 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-const rentedBookSchema = new mongoose.Schema({
-    bookId: { type: String, required: true },
-    rentalDuration: { type: Number, required: true },
-    rentStartDate: { type: Date, required: true },
-    rentEndDate: { type: Date, required: true }
-}, { _id: false });
-
 const userSchema = new mongoose.Schema({
-    id: { type: String, required: true, unique: true },
-    name: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    cart: [{ type: String }], // Array of book IDs
-    rentedBooks: [rentedBookSchema],
-    phoneNo: { type: String },
-    role: { type: String, enum: ['user', 'admin'], default: 'user' }
-});
+    id: {
+        type: String,
+        required: true,
+        unique: true
+    },
+    name: {
+        type: String,
+        required: true
+    },
+    email: {
+        type: String,
+        required: true,
+        unique: true
+    },
+    password: {
+        type: String,
+        required: true
+    },
+    phoneNo: {
+        type: String,
+        required: true
+    },
+    rentedBooks: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Book'
+    }]
+}, { timestamps: true });
 
-// Hash password before saving
+// Password hashing middleware
 userSchema.pre('save', async function(next) {
-    const user = this;
-    if (user.isModified('password')) {
-        user.password = await bcrypt.hash(user.password, 8);
+    if (this.isModified('password')) {
+        this.password = await bcrypt.hash(this.password, 8);
     }
     next();
 });
 
-// Method to check password
+// Password check method
 userSchema.methods.checkPassword = async function(password) {
-    return await bcrypt.compare(password, this.password);
+    return bcrypt.compare(password, this.password);
 };
 
-const User = mongoose.model('User', userSchema);
-module.exports = User;
+module.exports = mongoose.model('User', userSchema);

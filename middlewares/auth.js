@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
+const User = require("../models/user");
 
 const auth = async (req, res, next) => {
   try {
@@ -10,7 +11,13 @@ const auth = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { id: decoded.userId };
+    
+    const user = await User.findOne({ id: decoded.userId });
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    req.user = { id: user._id };
     next();
   } catch (error) {
     console.error("Auth middleware error:", error);
