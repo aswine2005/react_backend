@@ -213,6 +213,11 @@ app.get("/api/books/:id", async (req, res) => {
 app.post("/api/cart/add", auth, async (req, res) => {
   try {
     const { bookId } = req.body;
+    console.log('Adding to cart:', { 
+      bookId, 
+      userId: req.user.id,
+      body: req.body 
+    });
     
     if (!bookId) {
       return res.status(400).json({ 
@@ -230,6 +235,8 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
     // Find the book
     const book = await Book.findById(bookId);
+    console.log('Found book:', book);
+
     if (!book) {
       return res.status(404).json({ 
         success: false,
@@ -239,12 +246,15 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
     // Find or create cart
     let cart = await Cart.findOne({ user: req.user.id });
+    console.log('Found cart:', cart);
+
     if (!cart) {
       cart = new Cart({
         user: req.user.id,
         items: [],
         totalAmount: 0
       });
+      console.log('Created new cart:', cart);
     }
 
     // Check if book already in cart
@@ -271,8 +281,11 @@ app.post("/api/cart/add", auth, async (req, res) => {
       return total + (book.rentPrice * item.rentalDuration);
     }, 0);
 
+    console.log('Cart before save:', cart);
+
     // Save cart
     await cart.save();
+    console.log('Cart after save:', cart);
 
     // Populate book details
     await cart.populate('items.book');
@@ -284,7 +297,12 @@ app.post("/api/cart/add", auth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Cart add error:', error);
+    console.error('Cart add error:', {
+      error: error.message,
+      stack: error.stack,
+      userId: req.user?.id,
+      bookId: req.body?.bookId
+    });
     res.status(500).json({ 
       success: false,
       message: 'Error adding book to cart',

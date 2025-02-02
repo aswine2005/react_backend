@@ -17,16 +17,17 @@ const auth = async (req, res, next) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       
-      // Find user by ID
+      // Find user by MongoDB _id
       const user = await User.findById(decoded.userId);
       if (!user) {
         throw new Error('User not found');
       }
 
-      // Store user ID in req.user
+      // Store MongoDB _id in req.user
       req.user = { 
-        id: user._id  // MongoDB _id
+        id: user._id.toString()  // Convert ObjectId to string
       };
+
       next();
     } catch (err) {
       console.error('Token verification error:', err);

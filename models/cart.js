@@ -32,6 +32,12 @@ const cartSchema = new mongoose.Schema({
         required: true,
         default: 0
     }
-}, { timestamps: true });
+}, { 
+    timestamps: true,
+    toJSON: { virtuals: true }
+});
+
+// Ensure indexes for better performance
+cartSchema.index({ user: 1 });
 
 module.exports = mongoose.model('Cart', cartSchema);
