@@ -232,52 +232,57 @@ app.post("/api/cart/add", auth, async (req, res) => {
       });
     }
 
-    // Find existing cart or create new one
-    let cart = await Cart.findOne({ user: req.user.id });
-    
-    if (!cart) {
-      cart = new Cart({ 
-        user: req.user.id,
-        items: [],
-        totalAmount: 0
+    try {
+      // Find existing cart or create new one
+      let cart = await Cart.findOne({ user: req.user.id });
+      
+      if (!cart) {
+        cart = new Cart({ 
+          user: new mongoose.Types.ObjectId(req.user.id), // Convert to ObjectId
+          items: [],
+          totalAmount: 0
+        });
+      }
+
+      // Check if book already exists in cart
+      const existingItem = cart.items.find(item => 
+        item.book.toString() === bookId
+      );
+
+      if (existingItem) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Book already exists in cart' 
+        });
+      }
+
+      // Add new item to cart
+      cart.items.push({
+        book: new mongoose.Types.ObjectId(bookId),
+        quantity: 1,
+        rentalDuration: 1
       });
-    }
 
-    // Check if book already exists in cart
-    const existingItem = cart.items.find(item => 
-      item.book.toString() === bookId
-    );
+      // Calculate total amount
+      cart.totalAmount = cart.items.reduce((total, item) => {
+        return total + (book.rentPrice * item.rentalDuration);
+      }, 0);
 
-    if (existingItem) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Book already exists in cart' 
+      // Save cart
+      await cart.save();
+
+      // Populate book details before sending response
+      await cart.populate('items.book');
+
+      res.json({ 
+        success: true,
+        message: 'Book added to cart successfully',
+        cart 
       });
+    } catch (cartError) {
+      console.error('Cart operation error:', cartError);
+      throw new Error(`Cart operation failed: ${cartError.message}`);
     }
-
-    // Add new item to cart using new ObjectId
-    cart.items.push({
-      book: new mongoose.Types.ObjectId(bookId),
-      quantity: 1,
-      rentalDuration: 1
-    });
-
-    // Calculate total amount
-    cart.totalAmount = cart.items.reduce((total, item) => {
-      return total + (book.rentPrice * item.rentalDuration);
-    }, 0);
-
-    // Save cart
-    await cart.save();
-
-    // Populate book details before sending response
-    await cart.populate('items.book');
-
-    res.json({ 
-      success: true,
-      message: 'Book added to cart successfully',
-      cart 
-    });
   } catch (error) {
     console.error('Cart add error:', error);
     res.status(500).json({ 
@@ -290,7 +295,9 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
 app.get("/api/cart", auth, async (req, res) => {
   try {
-    const cart = await Cart.findOne({ user: req.user.id }).populate('items.book');
+    const cart = await Cart.findOne({ 
+      user: new mongoose.Types.ObjectId(req.user.id) 
+    }).populate('items.book');
     
     if (!cart) {
       return res.json({ 
@@ -318,7 +325,10 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
     const { rentalDuration } = req.body;
     const { bookId } = req.params;
 
-    const cart = await Cart.findOne({ user: req.user.id });
+    const cart = await Cart.findOne({ 
+      user: new mongoose.Types.ObjectId(req.user.id) 
+    });
+
     if (!cart) {
       return res.status(404).json({ 
         success: false,
@@ -326,7 +336,10 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
       });
     }
 
-    const cartItem = cart.items.find(item => item.book.toString() === bookId);
+    const cartItem = cart.items.find(item => 
+      item.book.toString() === bookId
+    );
+
     if (!cartItem) {
       return res.status(404).json({ 
         success: false,
@@ -363,7 +376,9 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
 app.delete("/api/cart/remove/:bookId", auth, async (req, res) => {
   try {
     const { bookId } = req.params;
-    const cart = await Cart.findOne({ userId: req.user.id });
+    const cart = await Cart.findOne({ 
+      user: new mongoose.Types.ObjectId(req.user.id) 
+    });
     
     if (!cart) {
       return res.status(404).json({ 
@@ -372,8 +387,12 @@ app.delete("/api/cart/remove/:bookId", auth, async (req, res) => {
       });
     }
 
-    cart.items = cart.items.filter(item => item.bookId !== bookId);
+    cart.items = cart.items.filter(item => 
+      item.book.toString() !== bookId
+    );
+
     await cart.save();
+    await cart.populate('items.book');
 
     res.json({ 
       success: true,
