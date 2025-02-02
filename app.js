@@ -192,15 +192,14 @@ app.post("/api/books", auth, async (req, res) => {
 });
 
 app.get("/api/books/:id", async (req, res) => {
-  const { id } = req.params;
   try {
-    const book = await Book.findOne({ id });
+    const book = await Book.findOne({ _id: req.params.id });
     if (!book) {
       return res.status(404).json({ message: "Book not found" });
     }
-    res.status(200).json(book);
-  } catch (err) {
-    console.error("Error fetching book:", err);
+    res.json(book);
+  } catch (error) {
+    console.error("Error fetching book:", error);
     res.status(500).json({ message: "Error fetching book" });
   }
 });
@@ -208,25 +207,30 @@ app.get("/api/books/:id", async (req, res) => {
 // Cart Routes
 app.post("/api/cart/add", auth, async (req, res) => {
   try {
-    const { bookId, title, author, imageUrl, rentPrice, rentalDuration, totalPrice } = req.body;
+    const { bookId } = req.body;
 
-    // Validate required fields
-    if (!bookId || !title || !author || !imageUrl || !rentPrice || !rentalDuration) {
-      return res.status(400).json({ 
+    // Find the book first
+    const book = await Book.findById(bookId);
+    if (!book) {
+      return res.status(404).json({ 
         success: false,
-        message: 'Missing required fields' 
+        message: 'Book not found' 
       });
     }
 
     // Find existing cart or create new one
-    let cart = await Cart.findOne({ userId: req.user.id });
+    let cart = await Cart.findOne({ user: req.user.id });
     
     if (!cart) {
-      cart = new Cart({ userId: req.user.id, items: [] });
+      cart = new Cart({ 
+        user: req.user.id, 
+        items: [],
+        totalAmount: 0
+      });
     }
 
     // Check if book already exists in cart
-    const existingItem = cart.items.find(item => item.bookId === bookId);
+    const existingItem = cart.items.find(item => item.book.toString() === bookId);
     if (existingItem) {
       return res.status(400).json({ 
         success: false,
@@ -236,17 +240,21 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
     // Add new item to cart
     cart.items.push({
-      bookId,
-      title,
-      author,
-      imageUrl,
-      rentPrice,
-      rentalDuration,
-      totalPrice
+      book: bookId,
+      quantity: 1,
+      rentalDuration: 1
     });
+
+    // Calculate total amount
+    cart.totalAmount = cart.items.reduce((total, item) => {
+      return total + (book.rentPrice * item.rentalDuration);
+    }, 0);
 
     // Save cart
     await cart.save();
+
+    // Populate book details before sending response
+    await cart.populate('items.book');
 
     res.json({ 
       success: true,
@@ -264,7 +272,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
 app.get("/api/cart", auth, async (req, res) => {
   try {
-    const cart = await Cart.findOne({ userId: req.user.id });
+    const cart = await Cart.findOne({ user: req.user.id }).populate('items.book');
     
     if (!cart) {
       return res.json({ 
@@ -292,7 +300,7 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
     const { rentalDuration } = req.body;
     const { bookId } = req.params;
 
-    const cart = await Cart.findOne({ userId: req.user.id });
+    const cart = await Cart.findOne({ user: req.user.id });
     if (!cart) {
       return res.status(404).json({ 
         success: false,
@@ -300,7 +308,7 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
       });
     }
 
-    const cartItem = cart.items.find(item => item.bookId === bookId);
+    const cartItem = cart.items.find(item => item.book.toString() === bookId);
     if (!cartItem) {
       return res.status(404).json({ 
         success: false,
@@ -309,8 +317,15 @@ app.put("/api/cart/update/:bookId", auth, async (req, res) => {
     }
 
     cartItem.rentalDuration = rentalDuration;
-    cartItem.totalPrice = cartItem.rentPrice * rentalDuration;
+    
+    // Recalculate total amount
+    const book = await Book.findById(bookId);
+    cart.totalAmount = cart.items.reduce((total, item) => {
+      return total + (book.rentPrice * item.rentalDuration);
+    }, 0);
+
     await cart.save();
+    await cart.populate('items.book');
 
     res.json({ 
       success: true,
