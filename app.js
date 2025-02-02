@@ -121,7 +121,11 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     // Generate token
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
 
     res.json({
       message: "Login successful",
@@ -208,6 +212,7 @@ app.get("/api/books/:id", async (req, res) => {
 app.post("/api/cart/add", auth, async (req, res) => {
   try {
     const { bookId } = req.body;
+    console.log('Adding to cart:', { bookId, userId: req.user.id });
 
     // Find the book first
     const book = await Book.findById(bookId);
@@ -256,6 +261,8 @@ app.post("/api/cart/add", auth, async (req, res) => {
     // Populate book details before sending response
     await cart.populate('items.book');
 
+    console.log('Cart after adding:', cart);
+
     res.json({ 
       success: true,
       message: 'Book added to cart successfully',
@@ -265,7 +272,8 @@ app.post("/api/cart/add", auth, async (req, res) => {
     console.error('Cart add error:', error);
     res.status(500).json({ 
       success: false,
-      message: 'Error adding book to cart' 
+      message: 'Error adding book to cart',
+      error: error.message 
     });
   }
 });
