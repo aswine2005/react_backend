@@ -16,9 +16,12 @@ const auth = async (req, res, next) => {
 
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      console.log('Decoded token:', decoded);
       
       // Find user by UUID
       const user = await User.findOne({ id: decoded.userId });
+      console.log('Found user:', user);
+
       if (!user) {
         throw new Error('User not found');
       }
@@ -28,6 +31,7 @@ const auth = async (req, res, next) => {
         mongoId: user._id,  // MongoDB ObjectId
         id: user.id        // UUID string
       };
+      console.log('Set req.user:', req.user);
       next();
     } catch (err) {
       console.error('Token verification error:', err);
