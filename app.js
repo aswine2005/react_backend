@@ -234,11 +234,11 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
     try {
       // Find existing cart or create new one
-      let cart = await Cart.findOne({ user: req.user.id });
+      let cart = await Cart.findOne({ user: req.user.id }); // req.user.id is already MongoDB _id
       
       if (!cart) {
         cart = new Cart({ 
-          user: new mongoose.Types.ObjectId(req.user.id), // Convert to ObjectId
+          user: req.user.id, // Already MongoDB _id
           items: [],
           totalAmount: 0
         });
@@ -258,7 +258,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
       // Add new item to cart
       cart.items.push({
-        book: new mongoose.Types.ObjectId(bookId),
+        book: bookId, // MongoDB will convert this automatically
         quantity: 1,
         rentalDuration: 1
       });
