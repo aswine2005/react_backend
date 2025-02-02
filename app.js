@@ -232,15 +232,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
       });
     }
 
-    // Validate book availability
-    if (!book.available || book.quantity < 1) {
-      return res.status(400).json({
-        success: false,
-        message: 'Book is not available for rental'
-      });
-    }
-
-    // Find existing cart or create new one using MongoDB _id
+    // Find existing cart or create new one
     let cart = await Cart.findOne({ user: req.user.id });
     
     if (!cart) {
@@ -251,7 +243,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
       });
     }
 
-    // Check if book already exists in cart using MongoDB ObjectId comparison
+    // Check if book already exists in cart
     const existingItem = cart.items.find(item => 
       item.book.toString() === bookId
     );
@@ -263,9 +255,9 @@ app.post("/api/cart/add", auth, async (req, res) => {
       });
     }
 
-    // Add new item to cart
+    // Add new item to cart using new ObjectId
     cart.items.push({
-      book: mongoose.Types.ObjectId(bookId),
+      book: new mongoose.Types.ObjectId(bookId),
       quantity: 1,
       rentalDuration: 1
     });
@@ -291,8 +283,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: 'Error adding book to cart',
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: error.message 
     });
   }
 });
