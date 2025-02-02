@@ -215,6 +215,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
     const { bookId } = req.body;
     console.log('Adding to cart:', { bookId, userId: req.user.id });
 
+    // Validate MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(bookId)) {
       return res.status(400).json({
         success: false,
@@ -231,7 +232,15 @@ app.post("/api/cart/add", auth, async (req, res) => {
       });
     }
 
-    // Find existing cart or create new one
+    // Validate book availability
+    if (!book.available || book.quantity < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Book is not available for rental'
+      });
+    }
+
+    // Find existing cart or create new one using MongoDB _id
     let cart = await Cart.findOne({ user: req.user.id });
     
     if (!cart) {
@@ -242,9 +251,9 @@ app.post("/api/cart/add", auth, async (req, res) => {
       });
     }
 
-    // Check if book already exists in cart
+    // Check if book already exists in cart using MongoDB ObjectId comparison
     const existingItem = cart.items.find(item => 
-      item.book.toString() === bookId.toString()
+      item.book.toString() === bookId
     );
 
     if (existingItem) {
@@ -256,7 +265,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
     // Add new item to cart
     cart.items.push({
-      book: bookId,
+      book: mongoose.Types.ObjectId(bookId),
       quantity: 1,
       rentalDuration: 1
     });
@@ -282,7 +291,8 @@ app.post("/api/cart/add", auth, async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: 'Error adding book to cart',
-      error: error.message 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
