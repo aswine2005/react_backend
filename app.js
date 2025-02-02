@@ -213,15 +213,7 @@ app.get("/api/books/:id", async (req, res) => {
 app.post("/api/cart/add", auth, async (req, res) => {
   try {
     const { bookId } = req.body;
-    console.log('Adding to cart:', { bookId, userId: req.user.id });
-
-    // Validate MongoDB ObjectId
-    if (!mongoose.Types.ObjectId.isValid(bookId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid book ID format'
-      });
-    }
+    console.log('Adding to cart:', { bookId, userId: req.user.mongoId });
 
     // Find the book first
     const book = await Book.findById(bookId);
@@ -234,11 +226,11 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
     try {
       // Find existing cart or create new one
-      let cart = await Cart.findOne({ user: req.user.id }); // req.user.id is already MongoDB _id
+      let cart = await Cart.findOne({ user: req.user.mongoId });
       
       if (!cart) {
         cart = new Cart({ 
-          user: req.user.id, // Already MongoDB _id
+          user: req.user.mongoId,
           items: [],
           totalAmount: 0
         });
@@ -258,7 +250,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
       // Add new item to cart
       cart.items.push({
-        book: bookId, // MongoDB will convert this automatically
+        book: book._id,
         quantity: 1,
         rentalDuration: 1
       });
@@ -295,9 +287,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
 app.get("/api/cart", auth, async (req, res) => {
   try {
-    const cart = await Cart.findOne({ 
-      user: new mongoose.Types.ObjectId(req.user.id) 
-    }).populate('items.book');
+    const cart = await Cart.findOne({ user: req.user.mongoId }).populate('items.book');
     
     if (!cart) {
       return res.json({ 

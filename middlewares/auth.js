@@ -23,10 +23,10 @@ const auth = async (req, res, next) => {
         throw new Error('User not found');
       }
 
-      // Store both IDs in req.user
+      // Store MongoDB _id in req.user
       req.user = { 
-        id: user._id, // MongoDB _id directly (not as string)
-        uuid: user.id  // UUID string
+        mongoId: user._id,  // MongoDB ObjectId
+        id: user.id        // UUID string
       };
       next();
     } catch (err) {
