@@ -1,9 +1,11 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
+const { v4: uuidv4 } = require('uuid');
 const Book = require('../models/book');
 
 const sampleBooks = [
   {
+    id: uuidv4(),
     title: "The Psychology of Money",
     author: "Morgan Housel",
     description: "Timeless lessons on wealth, greed, and happiness doing well with money isn't necessarily about what you know. It's about how you behave. And behavior is hard to teach, even to really smart people.",
@@ -15,6 +17,7 @@ const sampleBooks = [
     available: true
   },
   {
+    id: uuidv4(),
     title: "Atomic Habits",
     author: "James Clear",
     description: "An Easy & Proven Way to Build Good Habits & Break Bad Ones. No matter your goals, Atomic Habits offers a proven framework for improving every day.",
@@ -26,6 +29,7 @@ const sampleBooks = [
     available: true
   },
   {
+    id: uuidv4(),
     title: "The Silent Patient",
     author: "Alex Michaelides",
     description: "A woman shoots her husband dead. She never speaks another word. A criminal psychotherapist is determined to get her to talk and unravel the mystery of why she shot her husband.",
@@ -37,6 +41,7 @@ const sampleBooks = [
     available: true
   },
   {
+    id: uuidv4(),
     title: "Brief History of Time",
     author: "Stephen Hawking",
     description: "A landmark volume in science writing by one of the great minds of our time, Stephen Hawking's book explores such profound questions as: How did the universe begin—and what made its start possible?",
@@ -48,6 +53,7 @@ const sampleBooks = [
     available: true
   },
   {
+    id: uuidv4(),
     title: "Clean Code",
     author: "Robert C. Martin",
     description: "Even bad code can function. But if code isn't clean, it can bring a development organization to its knees. This book is a must for any developer, software engineer, project manager, team lead, or systems analyst.",
@@ -59,6 +65,7 @@ const sampleBooks = [
     available: true
   },
   {
+    id: uuidv4(),
     title: "Steve Jobs",
     author: "Walter Isaacson",
     description: "The biography of Apple co-founder Steve Jobs. Based on more than forty interviews with Jobs conducted over two years—as well as interviews with more than 100 family members, friends, adversaries, competitors, and colleagues.",
