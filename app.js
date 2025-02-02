@@ -15,19 +15,12 @@ const app = express();
 // CORS Configuration
 const corsOptions = {
   origin: [
-    'http://localhost:5176',  // Vite development server
+    'http://localhost:5173',  // Vite development server
     'http://localhost:3000',  // React development server
-    'https://react-backend-gc4j.onrender.com',  // Replace with your frontend deployment URL
-    'https://online-book-rental-store-react.vercel.app'  // Another potential frontend URL
+    'http://127.0.0.1:5173'   // Alternative local address
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
-    'Access-Control-Allow-Methods', 
-    'Access-Control-Allow-Origin', 
-    'Access-Control-Allow-Headers'
-  ],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
   optionsSuccessStatus: 200
 };
@@ -682,7 +675,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start the Server
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5173;
 app.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });

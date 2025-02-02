@@ -5,12 +5,32 @@ const cartItemSchema = new mongoose.Schema({
         type: String, 
         required: true 
     },
+    title: {
+        type: String,
+        required: true
+    },
+    author: {
+        type: String,
+        required: true
+    },
+    imageUrl: {
+        type: String,
+        required: true
+    },
+    rentPrice: {
+        type: Number,
+        required: true
+    },
     rentalDuration: { 
         type: Number, 
         required: true,
         min: [1, 'Rental duration must be at least 1 day'],
         max: [30, 'Rental duration cannot exceed 30 days'],
         default: 1
+    },
+    totalPrice: {
+        type: Number,
+        required: true
     }
 }, { _id: false });
 
@@ -32,6 +52,11 @@ const cartSchema = new mongoose.Schema({
             message: 'Duplicate books are not allowed in the cart'
         }
     },
+    totalAmount: {
+        type: Number,
+        required: true,
+        default: 0
+    },
     createdAt: { 
         type: Date, 
         default: Date.now 
@@ -42,8 +67,11 @@ const cartSchema = new mongoose.Schema({
     }
 });
 
-// Update the updatedAt timestamp before saving
+// Calculate total amount before saving
 cartSchema.pre('save', function(next) {
+    this.totalAmount = this.items.reduce((total, item) => {
+        return total + (item.rentPrice * item.rentalDuration);
+    }, 0);
     this.updatedAt = new Date();
     next();
 });
