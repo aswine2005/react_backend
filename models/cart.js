@@ -30,6 +30,10 @@ const cartSchema = new mongoose.Schema({
         required: true,
         default: 0
     }
-}, { timestamps: true });
+}, { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
 
 module.exports = mongoose.model('Cart', cartSchema);

@@ -215,6 +215,13 @@ app.post("/api/cart/add", auth, async (req, res) => {
     const { bookId } = req.body;
     console.log('Adding to cart:', { bookId, userId: req.user.id });
 
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid book ID format'
+      });
+    }
+
     // Find the book first
     const book = await Book.findById(bookId);
     if (!book) {
@@ -229,14 +236,17 @@ app.post("/api/cart/add", auth, async (req, res) => {
     
     if (!cart) {
       cart = new Cart({ 
-        user: req.user.id, // This is now MongoDB _id from auth middleware
+        user: req.user.id,
         items: [],
         totalAmount: 0
       });
     }
 
     // Check if book already exists in cart
-    const existingItem = cart.items.find(item => item.book.toString() === bookId);
+    const existingItem = cart.items.find(item => 
+      item.book.toString() === bookId.toString()
+    );
+
     if (existingItem) {
       return res.status(400).json({ 
         success: false,
@@ -261,8 +271,6 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
     // Populate book details before sending response
     await cart.populate('items.book');
-
-    console.log('Cart after adding:', cart);
 
     res.json({ 
       success: true,
