@@ -120,18 +120,18 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    // Generate token using UUID
+    // Generate token using MongoDB _id
     const token = jwt.sign(
-      { userId: user.id }, // Use UUID for token
+      { userId: user._id }, // Use MongoDB _id instead of UUID
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
 
     res.json({
+      success: true,
       message: "Login successful",
       user: {
-        id: user.id,
-        _id: user._id, // Include MongoDB _id
+        id: user._id,
         name: user.name,
         email: user.email,
         phoneNo: user.phoneNo
@@ -214,6 +214,13 @@ app.post("/api/cart/add", auth, async (req, res) => {
   try {
     const { bookId } = req.body;
     
+    if (!mongoose.Types.ObjectId.isValid(bookId)) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid book ID format' 
+      });
+    }
+
     // Find the book
     const book = await Book.findById(bookId);
     if (!book) {
@@ -271,6 +278,7 @@ app.post("/api/cart/add", auth, async (req, res) => {
 
   } catch (error) {
     console.error('Cart add error:', error);
+    // Don't send 401 status which triggers logout
     res.status(500).json({ 
       success: false,
       message: 'Error adding book to cart',
