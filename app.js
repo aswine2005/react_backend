@@ -205,166 +205,153 @@ app.get("/api/books/:id", async (req, res) => {
 });
 
 // Cart Routes
-app.get("/api/cart", auth, async (req, res) => {
+app.post("/api/cart/add", auth, async (req, res) => {
   try {
-    console.log('Fetching cart for user:', req.user.id);
-    
-    const cart = await Cart.findOne({ userId: req.user.id }).populate({
-      path: 'items.book',
-      select: 'title author rentPrice imageUrl available quantity'
-    });
+    const { bookId, title, author, imageUrl, rentPrice, rentalDuration, totalPrice } = req.body;
 
-    if (!cart) {
-      console.log('No cart found for user, creating new cart');
-      return res.status(200).json({ 
-        items: [],
-        message: 'Cart is empty' 
+    // Validate required fields
+    if (!bookId || !title || !author || !imageUrl || !rentPrice || !rentalDuration) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Missing required fields' 
       });
     }
 
-    // Validate and filter cart items
-    const validItems = cart.items.filter(item => 
-      item.book && item.book.available && item.book.quantity > 0
-    ).map(item => ({
-      bookId: item.book.id,
-      title: item.book.title,
-      author: item.book.author,
-      rentPrice: item.book.rentPrice,
-      imageUrl: item.book.imageUrl,
-      rentalDuration: item.rentalDuration || 1
-    }));
-
-    console.log('Cart items found:', {
-      userId: req.user.id,
-      itemCount: validItems.length
-    });
-
-    res.status(200).json({ 
-      items: validItems 
-    });
-  } catch (error) {
-    console.error('Error fetching cart:', error);
-    res.status(500).json({ 
-      message: 'Error retrieving cart', 
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined 
-    });
-  }
-});
-
-app.post("/api/cart/add", auth, async (req, res) => {
-  try {
-    const { bookId, rentalDuration = 1 } = req.body;
-    
-    // Validate book exists and is available
-    const book = await Book.findOne({ id: bookId });
-    if (!book) {
-      return res.status(404).json({ message: "Book not found" });
-    }
-
-    if (!book.available || book.quantity <= 0) {
-      return res.status(400).json({ message: "Book is not available" });
-    }
-
-    // Find or create cart
+    // Find existing cart or create new one
     let cart = await Cart.findOne({ userId: req.user.id });
+    
     if (!cart) {
       cart = new Cart({ userId: req.user.id, items: [] });
     }
 
-    // Check if book already in cart
+    // Check if book already exists in cart
     const existingItem = cart.items.find(item => item.bookId === bookId);
     if (existingItem) {
-      return res.status(400).json({ message: "Book already in cart" });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Book already exists in cart' 
+      });
     }
 
-    // Add book to cart with validated rental duration
-    cart.items.push({ 
-      bookId, 
-      rentalDuration: Math.max(1, Math.min(30, rentalDuration)) // Limit duration between 1 and 30 days
+    // Add new item to cart
+    cart.items.push({
+      bookId,
+      title,
+      author,
+      imageUrl,
+      rentPrice,
+      rentalDuration,
+      totalPrice
     });
-    
+
+    // Save cart
     await cart.save();
 
-    // Return updated cart with book details
-    const updatedCart = await Cart.findOne({ userId: req.user.id });
-    const cartItemsWithDetails = await Promise.all(
-      updatedCart.items.map(async (item) => {
-        const bookDetails = await Book.findOne({ id: item.bookId });
-        return {
-          bookId: bookDetails.id,
-          title: bookDetails.title,
-          author: bookDetails.author,
-          imageUrl: bookDetails.imageUrl,
-          rentPrice: bookDetails.rentPrice || 0,
-          rentalDuration: item.rentalDuration,
-          available: bookDetails.available && bookDetails.quantity > 0
-        };
-      })
-    );
-
-    res.status(201).json({ 
-      message: "Book added to cart",
-      items: cartItemsWithDetails
+    res.json({ 
+      success: true,
+      message: 'Book added to cart successfully',
+      cart 
     });
   } catch (error) {
-    console.error("Error adding to cart:", error);
-    res.status(500).json({ message: "Error adding to cart" });
+    console.error('Cart add error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error adding book to cart' 
+    });
   }
 });
 
+app.get("/api/cart", auth, async (req, res) => {
+  try {
+    const cart = await Cart.findOne({ userId: req.user.id });
+    
+    if (!cart) {
+      return res.json({ 
+        success: true,
+        cart: { items: [], totalAmount: 0 } 
+      });
+    }
+
+    res.json({ 
+      success: true,
+      cart 
+    });
+  } catch (error) {
+    console.error('Cart fetch error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error fetching cart' 
+    });
+  }
+});
+
+// Update cart item
 app.put("/api/cart/update/:bookId", auth, async (req, res) => {
   try {
-    const { bookId } = req.params;
     const { rentalDuration } = req.body;
+    const { bookId } = req.params;
 
-    // Validate rental duration
-    if (!rentalDuration || rentalDuration < 1) {
-      return res.status(400).json({ message: "Invalid rental duration" });
-    }
-
-    // Find cart
     const cart = await Cart.findOne({ userId: req.user.id });
     if (!cart) {
-      return res.status(404).json({ message: "Cart not found" });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Cart not found' 
+      });
     }
 
-    // Find item in cart
     const cartItem = cart.items.find(item => item.bookId === bookId);
     if (!cartItem) {
-      return res.status(404).json({ message: "Book not found in cart" });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Book not found in cart' 
+      });
     }
 
-    // Update rental duration
     cartItem.rentalDuration = rentalDuration;
-    cart.updatedAt = new Date();
+    cartItem.totalPrice = cartItem.rentPrice * rentalDuration;
     await cart.save();
 
-    res.json({ message: "Cart updated", cart });
+    res.json({ 
+      success: true,
+      message: 'Cart updated successfully',
+      cart 
+    });
   } catch (error) {
-    console.error("Error updating cart:", error);
-    res.status(500).json({ message: "Error updating cart" });
+    console.error('Cart update error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error updating cart' 
+    });
   }
 });
 
+// Remove item from cart
 app.delete("/api/cart/remove/:bookId", auth, async (req, res) => {
   try {
     const { bookId } = req.params;
-
-    // Find cart
     const cart = await Cart.findOne({ userId: req.user.id });
+    
     if (!cart) {
-      return res.status(404).json({ message: "Cart not found" });
+      return res.status(404).json({ 
+        success: false,
+        message: 'Cart not found' 
+      });
     }
 
-    // Remove item from cart
     cart.items = cart.items.filter(item => item.bookId !== bookId);
-    cart.updatedAt = new Date();
     await cart.save();
 
-    res.json({ message: "Book removed from cart", cart });
+    res.json({ 
+      success: true,
+      message: 'Book removed from cart',
+      cart 
+    });
   } catch (error) {
-    console.error("Error removing from cart:", error);
-    res.status(500).json({ message: "Error removing from cart" });
+    console.error('Cart remove error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Error removing book from cart' 
+    });
   }
 });
 
@@ -675,7 +662,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start the Server
-const PORT = process.env.PORT || 5173;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
