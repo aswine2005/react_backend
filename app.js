@@ -213,23 +213,9 @@ app.get("/api/books/:id", async (req, res) => {
 app.post("/api/cart/add", auth, async (req, res) => {
   try {
     const { bookId } = req.body;
-    console.log('Cart Add Request:', {
-      bookId,
-      userId: req.user.mongoId,
-      body: req.body
-    });
-
-    if (!bookId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Book ID is required'
-      });
-    }
-
-    // Find the book first
-    const book = await Book.findById(bookId).lean();
-    console.log('Found book:', book);
-
+    
+    // Find the book
+    const book = await Book.findById(bookId);
     if (!book) {
       return res.status(404).json({ 
         success: false,
@@ -237,77 +223,58 @@ app.post("/api/cart/add", auth, async (req, res) => {
       });
     }
 
-    try {
-      // Find existing cart
-      let cart = await Cart.findOne({ user: req.user.mongoId });
-      console.log('Existing cart:', cart);
-      
-      if (!cart) {
-        // Create new cart
-        cart = new Cart({ 
-          user: req.user.mongoId,
-          items: [],
-          totalAmount: 0
-        });
-        console.log('Created new cart:', cart);
-      }
-
-      // Check if book already exists in cart
-      const existingItem = cart.items.find(item => 
-        item.book.toString() === bookId
-      );
-
-      if (existingItem) {
-        return res.status(400).json({ 
-          success: false,
-          message: 'Book already exists in cart' 
-        });
-      }
-
-      // Add new item to cart
-      const newItem = {
-        book: book._id,
-        quantity: 1,
-        rentalDuration: 1
-      };
-      console.log('Adding new item:', newItem);
-
-      cart.items.push(newItem);
-
-      // Calculate total amount
-      cart.totalAmount = cart.items.reduce((total, item) => {
-        return total + (book.rentPrice * item.rentalDuration);
-      }, 0);
-
-      console.log('Cart before save:', cart);
-
-      // Save cart
-      const savedCart = await cart.save();
-      console.log('Saved cart:', savedCart);
-
-      // Populate book details before sending response
-      await savedCart.populate('items.book');
-
-      res.json({ 
-        success: true,
-        message: 'Book added to cart successfully',
-        cart: savedCart
+    // Find or create cart
+    let cart = await Cart.findOne({ user: req.user.id });
+    if (!cart) {
+      cart = new Cart({
+        user: req.user.id,
+        items: [],
+        totalAmount: 0
       });
-    } catch (cartError) {
-      console.error('Cart operation error:', cartError);
-      throw new Error(`Cart operation failed: ${cartError.message}`);
     }
-  } catch (error) {
-    console.error('Cart add error:', {
-      error,
-      stack: error.stack,
-      message: error.message
+
+    // Check if book already in cart
+    const existingItem = cart.items.find(item => 
+      item.book.toString() === bookId
+    );
+
+    if (existingItem) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Book already exists in cart' 
+      });
+    }
+
+    // Add new item
+    cart.items.push({
+      book: bookId,
+      quantity: 1,
+      rentalDuration: 1
     });
+
+    // Calculate total
+    cart.totalAmount = cart.items.reduce((total, item) => {
+      return total + (book.rentPrice * item.rentalDuration);
+    }, 0);
+
+    // Save cart
+    await cart.save();
+
+    // Populate book details
+    await cart.populate('items.book');
+
+    res.json({ 
+      success: true,
+      message: 'Book added to cart successfully',
+      cart 
+    });
+
+  } catch (error) {
+    console.error('Cart add error:', error);
     res.status(500).json({ 
       success: false,
       message: 'Error adding book to cart',
-      error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: error.message 
     });
   }
 });
