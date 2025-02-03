@@ -38,17 +38,24 @@ const cartSchema = new mongoose.Schema({
     toJSON: { virtuals: true }
 });
 
-// Drop any existing indexes
-cartSchema.indexes().forEach(async (index) => {
-    if (index.key.userId) {
-        await mongoose.model('Cart').collection.dropIndex(index.name);
-    }
-});
-
-// Create new index for user field
+// Create single unique index on user field
 cartSchema.index({ user: 1 }, { 
     unique: true,
-    name: 'user_unique_index'
+    background: true 
 });
 
-module.exports = mongoose.model('Cart', cartSchema);
+const Cart = mongoose.model('Cart', cartSchema);
+
+// Clean up old indexes if they exist
+Cart.collection.getIndexes()
+    .then(indexes => {
+        Object.keys(indexes).forEach(indexName => {
+            if (indexName !== '_id_' && indexName.includes('userId')) {
+                Cart.collection.dropIndex(indexName)
+                    .catch(err => console.log('Index drop error (can be ignored):', err));
+            }
+        });
+    })
+    .catch(err => console.log('Get indexes error (can be ignored):', err));
+
+module.exports = Cart;
