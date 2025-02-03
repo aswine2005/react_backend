@@ -295,13 +295,13 @@ app.post("/api/cart/add", auth, async (req, res) => {
       });
     }
 
-    // Find or create cart
+    // Find or create cart using MongoDB _id
     let cart = await Cart.findOne({ user: req.user.id });
     console.log('Found cart:', cart);
 
     if (!cart) {
       cart = new Cart({
-        user: req.user.id,
+        user: req.user.id,  // Using MongoDB _id
         items: [],
         totalAmount: 0
       });

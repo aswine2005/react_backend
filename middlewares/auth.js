@@ -25,7 +25,8 @@ const auth = async (req, res, next) => {
 
       // Store MongoDB _id in req.user
       req.user = { 
-        id: user._id.toString()  // Convert ObjectId to string
+        id: user._id,  // Store the MongoDB ObjectId directly
+        mongoId: user._id  // For backward compatibility
       };
 
       next();
