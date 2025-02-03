@@ -17,17 +17,18 @@ const auth = async (req, res, next) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       
+      if (!decoded.userId) {
+        throw new Error('Invalid token structure');
+      }
+
       // Find user by MongoDB _id
       const user = await User.findById(decoded.userId);
       if (!user) {
         throw new Error('User not found');
       }
 
-      // Store MongoDB _id in req.user
-      req.user = { 
-        id: user._id,  // Store the MongoDB ObjectId directly
-        mongoId: user._id  // For backward compatibility
-      };
+      // Store full user object in req.user
+      req.user = user;
 
       next();
     } catch (err) {

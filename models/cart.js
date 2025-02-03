@@ -24,7 +24,8 @@ const cartSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: true,
+        unique: true
     },
     items: [cartItemSchema],
     totalAmount: {
@@ -37,7 +38,17 @@ const cartSchema = new mongoose.Schema({
     toJSON: { virtuals: true }
 });
 
-// Ensure indexes for better performance
-cartSchema.index({ user: 1 });
+// Drop any existing indexes
+cartSchema.indexes().forEach(async (index) => {
+    if (index.key.userId) {
+        await mongoose.model('Cart').collection.dropIndex(index.name);
+    }
+});
+
+// Create new index for user field
+cartSchema.index({ user: 1 }, { 
+    unique: true,
+    name: 'user_unique_index'
+});
 
 module.exports = mongoose.model('Cart', cartSchema);
