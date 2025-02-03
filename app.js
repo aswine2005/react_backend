@@ -190,21 +190,31 @@ app.get("/api/auth/profile", auth, async (req, res) => {
 // Books Routes
 app.get("/api/books", async (req, res) => {
   try {
-    const books = await Book.find({})
-      .select('_id title author description imageUrl category rentPrice quantity available rating')
+    const books = await Book.find()
+      .select('_id title author description imageUrl category rentPrice quantity available averageRating totalRentals feedback')
+      .populate('feedback.user', 'name')
       .lean();
 
     console.log('Fetched books:', books.length);
 
+    const formattedBooks = books.map(book => ({
+      _id: book._id,
+      title: book.title,
+      author: book.author,
+      description: book.description,
+      imageUrl: book.imageUrl || '/images/default-book.jpg',
+      category: book.category,
+      rentPrice: book.rentPrice || 0,
+      quantity: book.quantity || 0,
+      available: book.quantity > 0,
+      averageRating: book.averageRating || 0,
+      totalRentals: book.totalRentals || 0,
+      feedback: book.feedback || []
+    }));
+
     res.json({
       success: true,
-      books: books.map(book => ({
-        ...book,
-        rating: book.rating || 0,
-        rentPrice: book.rentPrice || 0,
-        imageUrl: book.imageUrl || '/images/default-book.jpg',
-        available: book.available !== false
-      }))
+      books: formattedBooks
     });
   } catch (error) {
     console.error('Error fetching books:', error);

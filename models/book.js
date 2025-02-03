@@ -1,8 +1,9 @@
 const mongoose = require('mongoose');
 
 const feedbackSchema = new mongoose.Schema({
-    userId: {
-        type: String,
+    user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
         required: true
     },
     userName: {
@@ -26,11 +27,6 @@ const feedbackSchema = new mongoose.Schema({
 });
 
 const bookSchema = new mongoose.Schema({
-    id: {
-        type: String,
-        required: true,
-        unique: true
-    },
     title: {
         type: String,
         required: true,
@@ -70,13 +66,6 @@ const bookSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
-    feedback: [feedbackSchema],
-    rating: {
-        type: Number,
-        default: 0,
-        min: 0,
-        max: 5
-    },
     averageRating: {
         type: Number,
         default: 0,
@@ -86,8 +75,9 @@ const bookSchema = new mongoose.Schema({
     totalRentals: {
         type: Number,
         default: 0
-    }
-}, {
+    },
+    feedback: [feedbackSchema]
+}, { 
     timestamps: true,
     toJSON: { virtuals: true }
 });
@@ -104,5 +94,4 @@ bookSchema.pre('save', function(next) {
     next();
 });
 
-const Book = mongoose.model('Book', bookSchema);
-module.exports = Book;
+module.exports = mongoose.model('Book', bookSchema);
