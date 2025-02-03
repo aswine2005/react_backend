@@ -10,35 +10,19 @@ const Payment = require("./models/payment");
 
 const app = express();
 
-// CORS Configuration - Add this before other middleware
+// CORS Configuration
 app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://localhost:3000',
-    'https://your-frontend-domain.com' // Add your frontend domain
+    'https://react-book-store-frontend-5cs3.vercel.app', // Add your Vercel frontend domain
+    'https://your-frontend-domain.com'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
   optionsSuccessStatus: 200
 }));
-
-// Additional headers middleware
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Credentials', true);
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    return res.status(200).json({
-      body: "OK"
-    });
-  }
-  
-  next();
-});
 
 app.use(express.json());
 
@@ -581,6 +565,7 @@ app.get("/api/payments/:paymentId", auth, async (req, res) => {
 });
 
 // Start the Server
-app.listen(5000, () => {
-  console.log("The app is running at http://localhost:5000");
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
